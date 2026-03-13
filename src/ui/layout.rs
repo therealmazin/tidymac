@@ -1,7 +1,8 @@
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
+use bytesize::ByteSize;
 
 use crate::app::{App, Focus, Screen};
 use crate::system::SystemStats;
@@ -21,6 +22,10 @@ pub fn draw(frame: &mut Frame, app: &App, stats: &SystemStats) {
 
     draw_sidebar(frame, body[0], app);
     draw_main(frame, body[1], app, stats);
+
+    if app.show_confirm {
+        draw_confirm_dialog(frame, app);
+    }
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, stats: &SystemStats) {
@@ -89,4 +94,56 @@ fn draw_main(frame: &mut Frame, area: Rect, app: &App, stats: &SystemStats) {
         Screen::Apps => super::apps::draw(frame, area, app),
         Screen::Config => super::config::draw(frame, area, app),
     }
+}
+
+fn draw_confirm_dialog(frame: &mut Frame, app: &App) {
+    let selected: Vec<_> = app.scan_results.iter().filter(|e| e.selected).collect();
+    let total = ByteSize(app.selected_size());
+
+    let area = frame.area();
+    let popup_width = 50.min(area.width - 4);
+    let popup_height = (selected.len() as u16 + 6).min(area.height - 4);
+
+    let popup_area = Rect::new(
+        (area.width - popup_width) / 2,
+        (area.height - popup_height) / 2,
+        popup_width,
+        popup_height,
+    );
+
+    // Clear background
+    frame.render_widget(Clear, popup_area);
+
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("  About to move {} to Trash:", total),
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(""),
+    ];
+
+    for entry in &selected {
+        lines.push(Line::from(format!(
+            "   {} {} ({})",
+            entry.icon,
+            entry.name,
+            ByteSize(entry.size)
+        )));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  [Enter] Confirm    [Esc] Cancel",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let dialog = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Yellow))
+            .title(" 󰃢 Confirm Clean "),
+    );
+
+    frame.render_widget(dialog, popup_area);
 }

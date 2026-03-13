@@ -54,6 +54,8 @@ pub struct App {
     pub app_list_index: usize,
     pub show_orphans: bool,
     pub orphan_results: Vec<ScanEntry>,
+    pub show_confirm: bool,
+    pub last_clean_results: Vec<String>,
 }
 
 impl App {
@@ -72,6 +74,8 @@ impl App {
             app_list_index: 0,
             show_orphans: false,
             orphan_results: Vec::new(),
+            show_confirm: false,
+            last_clean_results: Vec::new(),
         }
     }
 
@@ -197,5 +201,33 @@ impl App {
                 self.app_list_index -= 1;
             }
         }
+    }
+
+    pub fn request_clean(&mut self) {
+        if self.selected_size() > 0 {
+            self.show_confirm = true;
+        }
+    }
+
+    pub fn confirm_clean(&mut self) {
+        let results = crate::cleaner::clean_selected(&self.scan_results);
+        self.last_clean_results = results
+            .into_iter()
+            .map(|r| match r {
+                Ok(msg) => msg,
+                Err(e) => format!("Error: {}", e),
+            })
+            .collect();
+        self.show_confirm = false;
+        // Re-scan to update
+        match self.screen {
+            Screen::Scan => self.run_scan(),
+            Screen::Dev => self.run_dev_scan(),
+            _ => {}
+        }
+    }
+
+    pub fn cancel_confirm(&mut self) {
+        self.show_confirm = false;
     }
 }

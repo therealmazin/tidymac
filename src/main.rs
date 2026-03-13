@@ -1,4 +1,5 @@
 mod app;
+mod cleaner;
 mod system;
 mod scanner;
 mod ui;
@@ -42,46 +43,59 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
         if event::poll(std::time::Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Char('q') => app.quit(),
-                        KeyCode::Tab => app.toggle_focus(),
-                        KeyCode::Char('s') => {
-                            match app.screen {
-                                app::Screen::Scan => app.run_scan(),
-                                app::Screen::Dev => app.run_dev_scan(),
-                                app::Screen::Apps => app.scan_apps(),
-                                _ => {}
-                            }
+                    if app.show_confirm {
+                        match key.code {
+                            KeyCode::Enter => app.confirm_clean(),
+                            KeyCode::Esc => app.cancel_confirm(),
+                            _ => {}
                         }
-                        KeyCode::Char('o') => {
-                            if app.screen == app::Screen::Apps {
-                                app.scan_orphan_apps();
+                    } else {
+                        match key.code {
+                            KeyCode::Char('q') => app.quit(),
+                            KeyCode::Tab => app.toggle_focus(),
+                            KeyCode::Char('s') => {
+                                match app.screen {
+                                    app::Screen::Scan => app.run_scan(),
+                                    app::Screen::Dev => app.run_dev_scan(),
+                                    app::Screen::Apps => app.scan_apps(),
+                                    _ => {}
+                                }
                             }
-                        }
-                        KeyCode::Char(' ') => {
-                            if app.focus == Focus::Main {
-                                app.toggle_selected();
+                            KeyCode::Char('o') => {
+                                if app.screen == app::Screen::Apps {
+                                    app.scan_orphan_apps();
+                                }
                             }
-                        }
-                        KeyCode::Up | KeyCode::Char('k') => {
-                            if app.focus == Focus::Sidebar {
-                                app.prev_sidebar();
-                            } else if app.screen == app::Screen::Apps {
-                                app.prev_app();
-                            } else {
-                                app.prev_list_item();
+                            KeyCode::Char('c') => {
+                                if app.focus == Focus::Main {
+                                    app.request_clean();
+                                }
                             }
-                        }
-                        KeyCode::Down | KeyCode::Char('j') => {
-                            if app.focus == Focus::Sidebar {
-                                app.next_sidebar();
-                            } else if app.screen == app::Screen::Apps {
-                                app.next_app();
-                            } else {
-                                app.next_list_item();
+                            KeyCode::Char(' ') => {
+                                if app.focus == Focus::Main {
+                                    app.toggle_selected();
+                                }
                             }
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                if app.focus == Focus::Sidebar {
+                                    app.prev_sidebar();
+                                } else if app.screen == app::Screen::Apps {
+                                    app.prev_app();
+                                } else {
+                                    app.prev_list_item();
+                                }
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                if app.focus == Focus::Sidebar {
+                                    app.next_sidebar();
+                                } else if app.screen == app::Screen::Apps {
+                                    app.next_app();
+                                } else {
+                                    app.next_list_item();
+                                }
+                            }
+                            _ => {}
                         }
-                        _ => {}
                     }
                 }
             }
