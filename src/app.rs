@@ -1,5 +1,7 @@
 use std::time::{Duration, Instant};
 
+use crate::scanner::ScanEntry;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
     Home,
@@ -44,6 +46,9 @@ pub struct App {
     pub focus: Focus,
     pub last_tick: Instant,
     pub tick_rate: Duration,
+    pub scan_results: Vec<ScanEntry>,
+    pub scan_list_index: usize,
+    pub scanning: bool,
 }
 
 impl App {
@@ -55,6 +60,9 @@ impl App {
             focus: Focus::Sidebar,
             last_tick: Instant::now(),
             tick_rate: Duration::from_secs(1),
+            scan_results: Vec::new(),
+            scan_list_index: 0,
+            scanning: false,
         }
     }
 
@@ -83,5 +91,64 @@ impl App {
             Focus::Sidebar => Focus::Main,
             Focus::Main => Focus::Sidebar,
         };
+    }
+
+    pub fn next_list_item(&mut self) {
+        if !self.scan_results.is_empty() {
+            self.scan_list_index = (self.scan_list_index + 1) % self.scan_results.len();
+        }
+    }
+
+    pub fn prev_list_item(&mut self) {
+        if !self.scan_results.is_empty() {
+            if self.scan_list_index == 0 {
+                self.scan_list_index = self.scan_results.len() - 1;
+            } else {
+                self.scan_list_index -= 1;
+            }
+        }
+    }
+
+    pub fn toggle_selected(&mut self) {
+        if let Some(entry) = self.scan_results.get_mut(self.scan_list_index) {
+            entry.selected = !entry.selected;
+        }
+    }
+
+    pub fn selected_size(&self) -> u64 {
+        self.scan_results
+            .iter()
+            .filter(|e| e.selected)
+            .map(|e| e.size)
+            .sum()
+    }
+
+    pub fn run_scan(&mut self) {
+        self.scanning = true;
+        self.scan_results.clear();
+        self.scan_list_index = 0;
+
+        // Run all scanners
+        self.scan_results.extend(crate::scanner::cache::scan());
+        self.scan_results.extend(crate::scanner::logs::scan());
+        self.scan_results.extend(crate::scanner::brew::scan());
+
+        // Sort by size descending
+        self.scan_results.sort_by(|a, b| b.size.cmp(&a.size));
+        self.scanning = false;
+    }
+
+    pub fn run_dev_scan(&mut self) {
+        self.scanning = true;
+        self.scan_results.clear();
+        self.scan_list_index = 0;
+
+        self.scan_results.extend(crate::scanner::xcode::scan());
+        self.scan_results.extend(crate::scanner::docker::scan());
+        self.scan_results.extend(crate::scanner::node::scan());
+        self.scan_results.extend(crate::scanner::cargo::scan());
+
+        self.scan_results.sort_by(|a, b| b.size.cmp(&a.size));
+        self.scanning = false;
     }
 }

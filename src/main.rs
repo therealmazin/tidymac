@@ -45,14 +45,30 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
                     match key.code {
                         KeyCode::Char('q') => app.quit(),
                         KeyCode::Tab => app.toggle_focus(),
+                        KeyCode::Char('s') => {
+                            match app.screen {
+                                app::Screen::Scan => app.run_scan(),
+                                app::Screen::Dev => app.run_dev_scan(),
+                                _ => {}
+                            }
+                        }
+                        KeyCode::Char(' ') => {
+                            if app.focus == Focus::Main {
+                                app.toggle_selected();
+                            }
+                        }
                         KeyCode::Up | KeyCode::Char('k') => {
                             if app.focus == Focus::Sidebar {
                                 app.prev_sidebar();
+                            } else {
+                                app.prev_list_item();
                             }
                         }
                         KeyCode::Down | KeyCode::Char('j') => {
                             if app.focus == Focus::Sidebar {
                                 app.next_sidebar();
+                            } else {
+                                app.next_list_item();
                             }
                         }
                         _ => {}
