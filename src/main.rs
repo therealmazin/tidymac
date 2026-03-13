@@ -49,7 +49,13 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
                             match app.screen {
                                 app::Screen::Scan => app.run_scan(),
                                 app::Screen::Dev => app.run_dev_scan(),
+                                app::Screen::Apps => app.scan_apps(),
                                 _ => {}
+                            }
+                        }
+                        KeyCode::Char('o') => {
+                            if app.screen == app::Screen::Apps {
+                                app.scan_orphan_apps();
                             }
                         }
                         KeyCode::Char(' ') => {
@@ -60,6 +66,8 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
                         KeyCode::Up | KeyCode::Char('k') => {
                             if app.focus == Focus::Sidebar {
                                 app.prev_sidebar();
+                            } else if app.screen == app::Screen::Apps {
+                                app.prev_app();
                             } else {
                                 app.prev_list_item();
                             }
@@ -67,6 +75,8 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
                         KeyCode::Down | KeyCode::Char('j') => {
                             if app.focus == Focus::Sidebar {
                                 app.next_sidebar();
+                            } else if app.screen == app::Screen::Apps {
+                                app.next_app();
                             } else {
                                 app.next_list_item();
                             }

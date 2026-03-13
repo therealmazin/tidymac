@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 use crate::scanner::ScanEntry;
+use crate::scanner::apps::AppInfo;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
@@ -49,6 +50,10 @@ pub struct App {
     pub scan_results: Vec<ScanEntry>,
     pub scan_list_index: usize,
     pub scanning: bool,
+    pub app_list: Vec<AppInfo>,
+    pub app_list_index: usize,
+    pub show_orphans: bool,
+    pub orphan_results: Vec<ScanEntry>,
 }
 
 impl App {
@@ -63,6 +68,10 @@ impl App {
             scan_results: Vec::new(),
             scan_list_index: 0,
             scanning: false,
+            app_list: Vec::new(),
+            app_list_index: 0,
+            show_orphans: false,
+            orphan_results: Vec::new(),
         }
     }
 
@@ -150,5 +159,43 @@ impl App {
 
         self.scan_results.sort_by(|a, b| b.size.cmp(&a.size));
         self.scanning = false;
+    }
+
+    pub fn scan_apps(&mut self) {
+        self.app_list = crate::scanner::apps::scan_installed();
+        self.app_list_index = 0;
+    }
+
+    pub fn scan_orphan_apps(&mut self) {
+        self.orphan_results = crate::scanner::apps::scan_orphans();
+        self.show_orphans = true;
+    }
+
+    pub fn next_app(&mut self) {
+        if self.show_orphans {
+            if !self.orphan_results.is_empty() {
+                self.app_list_index = (self.app_list_index + 1) % self.orphan_results.len();
+            }
+        } else if !self.app_list.is_empty() {
+            self.app_list_index = (self.app_list_index + 1) % self.app_list.len();
+        }
+    }
+
+    pub fn prev_app(&mut self) {
+        if self.show_orphans {
+            if !self.orphan_results.is_empty() {
+                if self.app_list_index == 0 {
+                    self.app_list_index = self.orphan_results.len() - 1;
+                } else {
+                    self.app_list_index -= 1;
+                }
+            }
+        } else if !self.app_list.is_empty() {
+            if self.app_list_index == 0 {
+                self.app_list_index = self.app_list.len() - 1;
+            } else {
+                self.app_list_index -= 1;
+            }
+        }
     }
 }
