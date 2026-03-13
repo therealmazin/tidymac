@@ -1,5 +1,6 @@
 mod app;
 mod system;
+mod scanner;
 mod ui;
 
 use app::{App, Focus};
