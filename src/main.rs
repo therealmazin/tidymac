@@ -1,4 +1,5 @@
 mod app;
+mod system;
 
 use app::{App, Focus};
 use crossterm::{
