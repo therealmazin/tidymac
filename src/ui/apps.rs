@@ -1,19 +1,19 @@
 use bytesize::ByteSize;
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, BorderType, Borders, List, ListItem, Paragraph},
 };
 
 use crate::app::App;
+use super::theme;
 
-pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
+pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
-            Constraint::Length(3),
-            Constraint::Min(0),
-            Constraint::Length(3),
+            Constraint::Length(2), // Title
+            Constraint::Min(0),   // List
         ])
         .split(area);
 
@@ -21,39 +21,47 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         Line::from(Span::styled(
             "  \u{f0032} Applications",
             Style::default()
-                .fg(Color::Cyan)
+                .fg(theme::ACCENT)
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
             "  Manage installed apps and find orphaned files.",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::TEXT_SECONDARY),
         )),
     ]);
     frame.render_widget(title, chunks[0]);
 
-    if app.show_orphans {
+    if app.scanning {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme::BORDER_NORMAL))
+            .title(if app.show_orphans { " Orphaned Files " } else { " Installed Apps " });
+        let spinner = Paragraph::new(format!(
+            "  {} {}",
+            app.spinner_char(),
+            app.scan_status
+        ))
+        .style(Style::default().fg(theme::SPINNER_COLOR))
+        .block(block);
+        frame.render_widget(spinner, chunks[1]);
+    } else if app.show_orphans {
         draw_orphans(frame, chunks[1], app);
     } else {
         draw_app_list(frame, chunks[1], app);
     }
-
-    let footer = Paragraph::new(
-        "  [s] Scan Apps  [o] Scan Orphans  [Tab] Switch view"
-    )
-    .style(Style::default().fg(Color::DarkGray));
-    frame.render_widget(footer, chunks[2]);
 }
 
-fn draw_app_list(frame: &mut Frame, area: Rect, app: &App) {
+fn draw_app_list(frame: &mut Frame, area: Rect, app: &mut App) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme::BORDER_NORMAL));
+
     if app.app_list.is_empty() {
         let empty = Paragraph::new("  Press 's' to scan installed applications.")
-            .style(Style::default().fg(Color::DarkGray))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::DarkGray))
-                    .title(" Installed Apps "),
-            );
+            .style(Style::default().fg(theme::TEXT_SECONDARY))
+            .block(block.title(" Installed Apps "));
         frame.render_widget(empty, area);
         return;
     }
@@ -61,44 +69,39 @@ fn draw_app_list(frame: &mut Frame, area: Rect, app: &App) {
     let items: Vec<ListItem> = app
         .app_list
         .iter()
-        .enumerate()
-        .map(|(i, app_info)| {
+        .map(|app_info| {
             let size_str = ByteSize(app_info.size).to_string();
             let related_count = app_info.related_files.len();
             let text = format!(
-                "  \u{f0032} {} {:>10}  ({} related files)",
+                " \u{f0032} {} {:>10}  ({} related)",
                 app_info.name, size_str, related_count
             );
-
-            let style = if i == app.app_list_index {
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::White)
-            };
-
-            ListItem::new(text).style(style)
+            ListItem::new(text).style(Style::default().fg(theme::TEXT_PRIMARY))
         })
         .collect();
 
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray))
-            .title(format!(" Installed Apps ({}) ", app.app_list.len())),
-    );
-    frame.render_widget(list, area);
+    let list = List::new(items)
+        .block(block.title(format!(" Installed Apps ({}) ", app.app_list.len())))
+        .highlight_style(
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .bg(theme::SELECTED_BG)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▸");
+    frame.render_stateful_widget(list, area, &mut app.app_list_state);
 }
 
-fn draw_orphans(frame: &mut Frame, area: Rect, app: &App) {
+fn draw_orphans(frame: &mut Frame, area: Rect, app: &mut App) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme::BORDER_NORMAL));
+
     if app.orphan_results.is_empty() {
         let empty = Paragraph::new("  No orphaned files found. Your system is clean!")
-            .style(Style::default().fg(Color::Green))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::DarkGray))
-                    .title(" Orphaned Files "),
-            );
+            .style(Style::default().fg(theme::CPU_GREEN))
+            .block(block.title(" Orphaned Files "));
         frame.render_widget(empty, area);
         return;
     }
@@ -106,32 +109,27 @@ fn draw_orphans(frame: &mut Frame, area: Rect, app: &App) {
     let items: Vec<ListItem> = app
         .orphan_results
         .iter()
-        .enumerate()
-        .map(|(i, entry)| {
+        .map(|entry| {
             let size_str = ByteSize(entry.size).to_string();
             let text = format!(
-                "  {} {} {:>10}\n      {}",
+                " {} {} {:>10}  {}",
                 entry.icon,
                 entry.name,
                 size_str,
                 entry.path.to_string_lossy()
             );
-
-            let style = if i == app.app_list_index {
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::White)
-            };
-
-            ListItem::new(text).style(style)
+            ListItem::new(text).style(Style::default().fg(theme::TEXT_PRIMARY))
         })
         .collect();
 
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray))
-            .title(format!(" Orphaned Files ({}) ", app.orphan_results.len())),
-    );
-    frame.render_widget(list, area);
+    let list = List::new(items)
+        .block(block.title(format!(" Orphaned Files ({}) ", app.orphan_results.len())))
+        .highlight_style(
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .bg(theme::SELECTED_BG)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▸");
+    frame.render_stateful_widget(list, area, &mut app.orphan_list_state);
 }

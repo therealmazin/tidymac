@@ -1,9 +1,19 @@
-use sysinfo::{Disks, System};
+use sysinfo::{Disks, Pid, ProcessesToUpdate, System};
+
+#[derive(Debug, Clone)]
+pub struct PortInfo {
+    pub port: u16,
+    pub pid: u32,
+    pub process_name: String,
+    pub memory: u64, // RSS in bytes
+}
 
 pub struct SystemStats {
     sys: System,
     disks: Disks,
     pub cpu_history: Vec<f32>,
+    pub per_core_usage: Vec<f32>,
+    pub listening_ports: Vec<PortInfo>,
 }
 
 impl SystemStats {
@@ -11,11 +21,16 @@ impl SystemStats {
         let mut sys = System::new_all();
         sys.refresh_all();
         let disks = Disks::new_with_refreshed_list();
-        Self {
+        let per_core = sys.cpus().iter().map(|c| c.cpu_usage()).collect();
+        let mut stats = Self {
             sys,
             disks,
-            cpu_history: Vec::with_capacity(60),
-        }
+            cpu_history: Vec::with_capacity(120),
+            per_core_usage: per_core,
+            listening_ports: Vec::new(),
+        };
+        stats.refresh_ports();
+        stats
     }
 
     pub fn refresh(&mut self) {
@@ -25,9 +40,65 @@ impl SystemStats {
 
         let cpu = self.sys.global_cpu_usage();
         self.cpu_history.push(cpu);
-        if self.cpu_history.len() > 60 {
+        if self.cpu_history.len() > 120 {
             self.cpu_history.remove(0);
         }
+
+        self.per_core_usage = self.sys.cpus().iter().map(|c| c.cpu_usage()).collect();
+        self.sys.refresh_processes(ProcessesToUpdate::All, false);
+        self.refresh_ports();
+    }
+
+    fn refresh_ports(&mut self) {
+        self.listening_ports.clear();
+        let output = std::process::Command::new("lsof")
+            .args(["-iTCP", "-sTCP:LISTEN", "-n", "-P"])
+            .output();
+
+        let output = match output {
+            Ok(o) if o.status.success() => o,
+            _ => return,
+        };
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut seen_ports = std::collections::HashSet::new();
+
+        for line in stdout.lines().skip(1) {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            if fields.len() < 9 {
+                continue;
+            }
+
+            let process_name = fields[0].replace("\\x20", " ");
+            let pid: u32 = match fields[1].parse() {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+
+            // NAME field is last, like "*:3000" or "127.0.0.1:8080"
+            let name_field = fields[fields.len() - 2]; // second to last (last is "(LISTEN)")
+            let port: u16 = match name_field.rsplit(':').next().and_then(|p| p.parse().ok()) {
+                Some(p) => p,
+                None => continue,
+            };
+
+            // Deduplicate (IPv4 + IPv6 show same port twice)
+            if seen_ports.insert(port) {
+                let memory = self.sys
+                    .process(Pid::from(pid as usize))
+                    .map(|p| p.memory())
+                    .unwrap_or(0);
+
+                self.listening_ports.push(PortInfo {
+                    port,
+                    pid,
+                    process_name,
+                    memory,
+                });
+            }
+        }
+
+        self.listening_ports.sort_by_key(|p| p.port);
     }
 
     pub fn cpu_usage(&self) -> f32 {
@@ -38,12 +109,32 @@ impl SystemStats {
         self.sys.cpus().len()
     }
 
+    pub fn per_core(&self) -> &[f32] {
+        &self.per_core_usage
+    }
+
     pub fn memory_used(&self) -> u64 {
         self.sys.used_memory()
     }
 
     pub fn memory_total(&self) -> u64 {
         self.sys.total_memory()
+    }
+
+    pub fn memory_available(&self) -> u64 {
+        self.sys.available_memory()
+    }
+
+    pub fn memory_free(&self) -> u64 {
+        self.sys.free_memory()
+    }
+
+    pub fn swap_used(&self) -> u64 {
+        self.sys.used_swap()
+    }
+
+    pub fn swap_total(&self) -> u64 {
+        self.sys.total_swap()
     }
 
     pub fn memory_percent(&self) -> f32 {
@@ -79,6 +170,14 @@ impl SystemStats {
                 let idx = ((v / 100.0) * 7.0).round() as usize;
                 bars[idx.min(7)]
             })
+            .collect()
+    }
+
+    /// Returns CPU history as u64 values (0-10000) for Sparkline widget
+    pub fn cpu_history_u64(&self) -> Vec<u64> {
+        self.cpu_history
+            .iter()
+            .map(|&v| (v * 100.0) as u64)
             .collect()
     }
 }
@@ -137,7 +236,6 @@ mod tests {
     #[test]
     fn test_cpu_sparkline_empty() {
         let stats = SystemStats::new();
-        // No history yet, should be empty
         assert!(stats.cpu_sparkline().is_empty());
     }
 
@@ -145,7 +243,12 @@ mod tests {
     fn test_disk_usage_has_root() {
         let stats = SystemStats::new();
         let disks = stats.disk_usage();
-        // macOS should always have a root disk
         assert!(!disks.is_empty());
+    }
+
+    #[test]
+    fn test_per_core_populated() {
+        let stats = SystemStats::new();
+        assert!(!stats.per_core().is_empty());
     }
 }
