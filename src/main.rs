@@ -94,6 +94,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
                                     app.next_list_item();
                                 }
                             }
+                            KeyCode::Esc => {
+                                app.focus = Focus::Sidebar;
+                            }
                             _ => {}
                         }
                     }
