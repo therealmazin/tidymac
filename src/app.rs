@@ -56,6 +56,8 @@ pub struct App {
     pub orphan_results: Vec<ScanEntry>,
     pub show_confirm: bool,
     pub last_clean_results: Vec<String>,
+    pub safe_mode: bool,
+    pub config_index: usize,
 }
 
 impl App {
@@ -76,6 +78,8 @@ impl App {
             orphan_results: Vec::new(),
             show_confirm: false,
             last_clean_results: Vec::new(),
+            safe_mode: true,  // dry-run by default
+            config_index: 0,
         }
     }
 
@@ -87,6 +91,8 @@ impl App {
         let screens = Screen::all();
         self.sidebar_index = (self.sidebar_index + 1) % screens.len();
         self.screen = screens[self.sidebar_index];
+        self.scan_results.clear();
+        self.scan_list_index = 0;
     }
 
     pub fn prev_sidebar(&mut self) {
@@ -97,6 +103,8 @@ impl App {
             self.sidebar_index -= 1;
         }
         self.screen = screens[self.sidebar_index];
+        self.scan_results.clear();
+        self.scan_list_index = 0;
     }
 
     pub fn toggle_focus(&mut self) {
