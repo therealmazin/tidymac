@@ -1,11 +1,80 @@
-use super::dir_size;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone)]
-pub struct SpaceEntry {
-    pub name: String,
-    pub path: PathBuf,
-    pub size: u64,
+/// Fast directory size using `du -sk` (much faster than walkdir)
+pub fn fast_dir_size(path: &Path) -> u64 {
+    let output = std::process::Command::new("du")
+        .args(["-sk", &path.to_string_lossy()])
+        .stderr(std::process::Stdio::null())
+        .output();
+    match output {
+        Ok(o) if o.status.success() => {
+            let s = String::from_utf8_lossy(&o.stdout);
+            s.split_whitespace()
+                .next()
+                .and_then(|n| n.parse::<u64>().ok())
+                .map(|kb| kb * 1024)
+                .unwrap_or(0)
+        }
+        _ => 0,
+    }
+}
+
+/// Fast scan of immediate children using `du -sk *` in one call
+fn fast_children_sizes(path: &Path) -> Vec<(String, PathBuf, u64, bool)> {
+    // Use du -sk with max-depth=1 to get all children in one call
+    let output = std::process::Command::new("du")
+        .args(["-sk", "-d1", &path.to_string_lossy()])
+        .stderr(std::process::Stdio::null())
+        .output();
+
+    let mut results = Vec::new();
+
+    let output = match output {
+        Ok(o) if o.status.success() => o,
+        _ => return results,
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parent_str = path.to_string_lossy();
+
+    for line in stdout.lines() {
+        let mut parts = line.splitn(2, '\t');
+        let size_kb: u64 = match parts.next().and_then(|s| s.trim().parse().ok()) {
+            Some(s) => s,
+            None => continue,
+        };
+        let entry_path_str = match parts.next() {
+            Some(p) => p.trim(),
+            None => continue,
+        };
+
+        // Skip the parent directory itself (last line in du output)
+        if entry_path_str == parent_str {
+            continue;
+        }
+
+        let entry_path = PathBuf::from(entry_path_str);
+        let name = entry_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        // Skip hidden dirs
+        if name.starts_with('.') && name != ".Trash" {
+            continue;
+        }
+
+        let size = size_kb * 1024;
+        if size < 1_000_000 {
+            continue; // Skip < 1MB
+        }
+
+        let is_dir = entry_path.is_dir();
+        results.push((name, entry_path, size, is_dir));
+    }
+
+    results.sort_by(|a, b| b.2.cmp(&a.2));
+    results
 }
 
 #[derive(Debug, Clone)]
@@ -20,83 +89,17 @@ pub struct SpaceNode {
 }
 
 impl SpaceNode {
-    /// Load immediate children of this directory node
+    /// Load immediate children using fast du command
     pub fn load_children(&mut self) {
         if self.children_loaded || !self.is_dir {
             return;
         }
 
-        let read_dir = match std::fs::read_dir(&self.path) {
-            Ok(rd) => rd,
-            Err(_) => {
-                self.children_loaded = true;
-                return;
-            }
-        };
-
-        for entry in read_dir.filter_map(|e| e.ok()) {
-            let entry_path = entry.path();
-            let name = entry.file_name().to_string_lossy().to_string();
-
-            // Skip hidden files/dirs (except .Trash)
-            if name.starts_with('.') && name != ".Trash" {
-                continue;
-            }
-
-            let is_dir = entry_path.is_dir();
-            let size = if is_dir {
-                dir_size(&entry_path)
-            } else {
-                entry.metadata().map(|m| m.len()).unwrap_or(0)
-            };
-
-            if size > 1_000_000 { // Only show > 1 MB
-                self.children.push(SpaceNode {
-                    name,
-                    path: entry_path,
-                    size,
-                    is_dir,
-                    expanded: false,
-                    children: Vec::new(),
-                    children_loaded: false,
-                });
-            }
-        }
-
-        self.children.sort_by(|a, b| b.size.cmp(&a.size));
-        self.children_loaded = true;
-    }
-}
-
-/// Scan top-level home directories (initial fast scan)
-pub fn scan_home_tree() -> Vec<SpaceNode> {
-    let home = dirs::home_dir().unwrap_or_default();
-    let mut nodes = Vec::new();
-
-    let read_dir = match std::fs::read_dir(&home) {
-        Ok(rd) => rd,
-        Err(_) => return nodes,
-    };
-
-    for entry in read_dir.filter_map(|e| e.ok()) {
-        let entry_path = entry.path();
-        let name = entry.file_name().to_string_lossy().to_string();
-
-        if name.starts_with('.') && name != ".Trash" {
-            continue;
-        }
-
-        let is_dir = entry_path.is_dir();
-        let size = if is_dir {
-            dir_size(&entry_path)
-        } else {
-            entry.metadata().map(|m| m.len()).unwrap_or(0)
-        };
-
-        if size > 1_000_000 {
-            nodes.push(SpaceNode {
+        let children = fast_children_sizes(&self.path);
+        for (name, path, size, is_dir) in children {
+            self.children.push(SpaceNode {
                 name,
-                path: entry_path,
+                path,
                 size,
                 is_dir,
                 expanded: false,
@@ -104,10 +107,28 @@ pub fn scan_home_tree() -> Vec<SpaceNode> {
                 children_loaded: false,
             });
         }
-    }
 
-    nodes.sort_by(|a, b| b.size.cmp(&a.size));
-    nodes
+        self.children_loaded = true;
+    }
+}
+
+/// Scan top-level home directories using fast du
+pub fn scan_home_tree() -> Vec<SpaceNode> {
+    let home = dirs::home_dir().unwrap_or_default();
+    let children = fast_children_sizes(&home);
+
+    children
+        .into_iter()
+        .map(|(name, path, size, is_dir)| SpaceNode {
+            name,
+            path,
+            size,
+            is_dir,
+            expanded: false,
+            children: Vec::new(),
+            children_loaded: false,
+        })
+        .collect()
 }
 
 /// Visible item for flattened tree rendering
@@ -118,7 +139,7 @@ pub struct SpaceVisibleItem {
     pub is_dir: bool,
     pub expanded: bool,
     pub depth: usize,
-    pub tree_path: Vec<usize>, // indices to navigate to this node in the tree
+    pub tree_path: Vec<usize>,
 }
 
 /// Flatten tree into visible items list
@@ -169,46 +190,4 @@ pub fn get_node_mut<'a>(tree: &'a mut [SpaceNode], tree_path: &[usize]) -> Optio
         node = &mut node.children[idx];
     }
     Some(node)
-}
-
-// Keep for backward compat with ScanMessage::SpaceResults
-pub fn scan_dir(path: &std::path::Path) -> Vec<SpaceEntry> {
-    let mut entries = Vec::new();
-    let read_dir = match std::fs::read_dir(path) {
-        Ok(rd) => rd,
-        Err(_) => return entries,
-    };
-
-    for entry in read_dir.filter_map(|e| e.ok()) {
-        let entry_path = entry.path();
-        if !entry_path.is_dir() {
-            if let Ok(meta) = entry.metadata() {
-                if meta.len() > 1_000_000 {
-                    entries.push(SpaceEntry {
-                        name: entry.file_name().to_string_lossy().to_string(),
-                        path: entry_path,
-                        size: meta.len(),
-                    });
-                }
-            }
-            continue;
-        }
-
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with('.') && name != ".Trash" {
-            continue;
-        }
-
-        let size = dir_size(&entry_path);
-        if size > 1_000_000 {
-            entries.push(SpaceEntry {
-                name,
-                path: entry_path,
-                size,
-            });
-        }
-    }
-
-    entries.sort_by(|a, b| b.size.cmp(&a.size));
-    entries
 }

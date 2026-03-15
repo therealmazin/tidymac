@@ -44,13 +44,21 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
             loop {
                 match rx.try_recv() {
                     Ok(ScanMessage::SmartScanProgress(step_name)) => {
-                        // Mark completed step
                         for step in &mut app.scan_steps {
                             if step.name == step_name {
                                 step.done = true;
                                 break;
                             }
                         }
+                    }
+                    Ok(ScanMessage::CleanProgress { msg, size_freed }) => {
+                        app.clean_progress += 1;
+                        app.clean_size_freed += size_freed;
+                        app.last_clean_results.push(msg);
+                    }
+                    Ok(ScanMessage::CleanDone) => {
+                        final_msg = Some(ScanMessage::CleanDone);
+                        break;
                     }
                     Ok(msg) => {
                         final_msg = Some(msg);
@@ -68,7 +76,11 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
         }
         if let Some(msg) = final_msg {
             match msg {
-                ScanMessage::SmartScanProgress(_) => {} // handled above
+                ScanMessage::SmartScanProgress(_) => {}
+                ScanMessage::CleanProgress { .. } => {}
+                ScanMessage::CleanDone => {
+                    app.confirm_kind = ConfirmKind::CleanDone;
+                }
                 ScanMessage::ScanResults(results) => {
                     app.scan_results = results;
                     if !app.scan_results.is_empty() {
@@ -105,13 +117,23 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
                         app.space_list_state.select(Some(0));
                     }
                 }
+                ScanMessage::SpaceChildrenLoaded { tree_path, children } => {
+                    if let Some(node) = crate::scanner::space::get_node_mut(&mut app.space_tree, &tree_path) {
+                        node.children = children;
+                        node.children_loaded = true;
+                        node.expanded = true;
+                    }
+                    app.space_expanding = false;
+                    app.rebuild_space_visible();
+                    app.space_list_state.select(Some(app.space_list_index));
+                }
             }
             app.scanning = false;
             app.scan_receiver = None;
             app.scan_status.clear();
         }
 
-        if app.scanning {
+        if app.scanning || app.space_expanding {
             app.tick_spinner();
         }
 
@@ -121,17 +143,33 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
                     if app.is_confirming() {
-                        match key.code {
-                            KeyCode::Enter => {
-                                match app.confirm_kind {
-                                    ConfirmKind::CleanScan => app.confirm_clean(),
-                                    ConfirmKind::UninstallApp => app.confirm_uninstall(),
-                                    ConfirmKind::KillPort => app.confirm_kill_port(),
-                                    ConfirmKind::None => {}
+                        match app.confirm_kind {
+                            ConfirmKind::Cleaning => {} // can't dismiss while cleaning
+                            ConfirmKind::CleanDone => {
+                                if key.code == KeyCode::Enter || key.code == KeyCode::Esc {
+                                    app.confirm_kind = ConfirmKind::None;
+                                    // Re-scan current screen
+                                    match app.screen {
+                                        app::Screen::SmartScan => app.run_smart_scan(),
+                                        app::Screen::LargeOld => app.run_large_old_scan(),
+                                        _ => {}
+                                    }
                                 }
                             }
-                            KeyCode::Esc => app.cancel_confirm(),
-                            _ => {}
+                            _ => {
+                                match key.code {
+                                    KeyCode::Enter => {
+                                        match app.confirm_kind {
+                                            ConfirmKind::CleanScan => app.confirm_clean(),
+                                            ConfirmKind::UninstallApp => app.confirm_uninstall(),
+                                            ConfirmKind::KillPort => app.confirm_kill_port(),
+                                            _ => {}
+                                        }
+                                    }
+                                    KeyCode::Esc => app.cancel_confirm(),
+                                    _ => {}
+                                }
+                            }
                         }
                     } else {
                         // Ctrl+C always quits

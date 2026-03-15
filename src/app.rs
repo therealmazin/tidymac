@@ -55,6 +55,8 @@ pub enum ConfirmKind {
     CleanScan,
     UninstallApp,
     KillPort,
+    Cleaning,   // progress bar during clean
+    CleanDone,  // finished summary
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,9 +86,15 @@ pub enum ScanMessage {
     ScanResults(Vec<ScanEntry>),
     SmartScanResults(Vec<SmartScanCategory>),
     SmartScanProgress(String), // step name just completed
+    CleanProgress { msg: String, size_freed: u64 },
+    CleanDone,
     AppList(Vec<AppInfo>),
     OrphanResults(Vec<ScanEntry>),
     SpaceTree(Vec<SpaceNode>),
+    SpaceChildrenLoaded {
+        tree_path: Vec<usize>,
+        children: Vec<SpaceNode>,
+    },
 }
 
 pub struct App {
@@ -120,9 +128,13 @@ pub struct App {
     pub space_visible: Vec<SpaceVisibleItem>,
     pub space_list_index: usize,
     pub space_list_state: ListState,
-    // Confirm dialog
+    pub space_expanding: bool,
+    // Confirm dialog + cleaning progress
     pub confirm_kind: ConfirmKind,
     pub last_clean_results: Vec<String>,
+    pub clean_progress: usize,     // items cleaned so far
+    pub clean_total: usize,        // total items to clean
+    pub clean_size_freed: u64,     // bytes freed so far
     // Settings
     pub safe_mode: bool,
     pub config_index: usize,
@@ -166,8 +178,12 @@ impl App {
             space_visible: Vec::new(),
             space_list_index: 0,
             space_list_state: ListState::default(),
+            space_expanding: false,
             confirm_kind: ConfirmKind::None,
             last_clean_results: Vec::new(),
+            clean_progress: 0,
+            clean_total: 0,
+            clean_size_freed: 0,
             safe_mode: true,
             config_index: 0,
             port_list_index: 0,
@@ -413,16 +429,27 @@ impl App {
             .cloned()
             .collect();
 
-        let results = crate::cleaner::clean_selected(&entries);
-        self.last_clean_results = results
-            .into_iter()
-            .map(|r| match r {
-                Ok(msg) => msg,
-                Err(e) => format!("Error: {}", e),
-            })
-            .collect();
-        self.confirm_kind = ConfirmKind::None;
-        self.run_smart_scan();
+        self.clean_total = entries.len();
+        self.clean_progress = 0;
+        self.clean_size_freed = 0;
+        self.last_clean_results.clear();
+        self.confirm_kind = ConfirmKind::Cleaning;
+
+        let (tx, rx) = mpsc::channel();
+        self.scan_receiver = Some(rx);
+
+        std::thread::spawn(move || {
+            for entry in &entries {
+                let size = entry.size;
+                let result = crate::cleaner::move_to_trash(&entry.path);
+                let msg = match result {
+                    Ok(()) => format!("✓ {} ({})", entry.name, bytesize::ByteSize(size)),
+                    Err(e) => format!("✗ {}: {}", entry.name, e),
+                };
+                let _ = tx.send(ScanMessage::CleanProgress { msg, size_freed: size });
+            }
+            let _ = tx.send(ScanMessage::CleanDone);
+        });
     }
 
     // Large & Old Files
@@ -476,6 +503,9 @@ impl App {
     }
 
     pub fn toggle_space_expand(&mut self) {
+        if self.space_expanding {
+            return; // already loading children
+        }
         if let Some(item) = self.space_visible.get(self.space_list_index) {
             if !item.is_dir {
                 return;
@@ -483,18 +513,45 @@ impl App {
             let tree_path = item.tree_path.clone();
             if let Some(node) = crate::scanner::space::get_node_mut(&mut self.space_tree, &tree_path) {
                 if node.expanded {
+                    // Collapse is instant — no IO needed
                     node.expanded = false;
-                } else {
-                    node.load_children();
+                    self.rebuild_space_visible();
+                    if self.space_list_index >= self.space_visible.len() {
+                        self.space_list_index = self.space_visible.len().saturating_sub(1);
+                    }
+                    self.space_list_state.select(Some(self.space_list_index));
+                } else if node.children_loaded {
+                    // Already cached — instant expand
                     node.expanded = true;
+                    self.rebuild_space_visible();
+                    self.space_list_state.select(Some(self.space_list_index));
+                } else {
+                    // Need to load children asynchronously
+                    self.space_expanding = true;
+                    let path = node.path.clone();
+                    let tp = tree_path.clone();
+
+                    let (tx, rx) = mpsc::channel();
+                    self.scan_receiver = Some(rx);
+
+                    std::thread::spawn(move || {
+                        let mut temp_node = crate::scanner::space::SpaceNode {
+                            name: String::new(),
+                            path: path,
+                            size: 0,
+                            is_dir: true,
+                            expanded: false,
+                            children: Vec::new(),
+                            children_loaded: false,
+                        };
+                        temp_node.load_children();
+                        let _ = tx.send(ScanMessage::SpaceChildrenLoaded {
+                            tree_path: tp,
+                            children: temp_node.children,
+                        });
+                    });
                 }
             }
-            self.rebuild_space_visible();
-            // Keep selection in bounds
-            if self.space_list_index >= self.space_visible.len() {
-                self.space_list_index = self.space_visible.len().saturating_sub(1);
-            }
-            self.space_list_state.select(Some(self.space_list_index));
         }
     }
 
@@ -646,17 +703,38 @@ impl App {
             self.clean_smart_scan();
             return;
         }
-        let results = crate::cleaner::clean_selected(&self.scan_results);
-        self.last_clean_results = results
-            .into_iter()
-            .map(|r| match r {
-                Ok(msg) => msg,
-                Err(e) => format!("Error: {}", e),
-            })
+        // LargeOld or other screens — also use async cleaning
+        let entries: Vec<ScanEntry> = self.scan_results
+            .iter()
+            .filter(|e| e.selected)
+            .cloned()
             .collect();
-        self.confirm_kind = ConfirmKind::None;
+
+        self.clean_total = entries.len();
+        self.clean_progress = 0;
+        self.clean_size_freed = 0;
+        self.last_clean_results.clear();
+        self.confirm_kind = ConfirmKind::Cleaning;
+
+        let (tx, rx) = mpsc::channel();
+        self.scan_receiver = Some(rx);
+
+        std::thread::spawn(move || {
+            for entry in &entries {
+                let size = entry.size;
+                let result = crate::cleaner::move_to_trash(&entry.path);
+                let msg = match result {
+                    Ok(()) => format!("✓ {} ({})", entry.name, bytesize::ByteSize(size)),
+                    Err(e) => format!("✗ {}: {}", entry.name, e),
+                };
+                let _ = tx.send(ScanMessage::CleanProgress { msg, size_freed: size });
+            }
+            let _ = tx.send(ScanMessage::CleanDone);
+        });
+
+        // Note: re-scan happens when user dismisses the CleanDone screen
         if self.screen == Screen::LargeOld {
-            self.run_large_old_scan();
+            // Will re-scan after done
         }
     }
 

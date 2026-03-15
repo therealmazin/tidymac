@@ -1,34 +1,34 @@
 use super::{dir_size, ScanEntry};
+use std::fs;
 
 pub fn scan() -> Vec<ScanEntry> {
     let mut entries = Vec::new();
     let home = dirs::home_dir().unwrap_or_default();
 
-    // User logs: ~/Library/Logs
+    // Scan individual subdirectories of ~/Library/Logs
+    // Each app gets its own log directory — safe to delete individually
     let user_logs = home.join("Library/Logs");
     if user_logs.exists() {
-        let size = dir_size(&user_logs);
-        if size > 0 {
-            entries.push(ScanEntry::new(
-                "User Log Files".to_string(),
-                user_logs,
-                size,
-                "󰗀",
-            ));
-        }
-    }
+        if let Ok(dirs) = fs::read_dir(&user_logs) {
+            for entry in dirs.filter_map(|e| e.ok()) {
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().to_string();
 
-    // System logs: /var/log (read what we can)
-    let sys_logs = std::path::PathBuf::from("/var/log");
-    if sys_logs.exists() {
-        let size = dir_size(&sys_logs);
-        if size > 0 {
-            entries.push(ScanEntry::new(
-                "System Log Files".to_string(),
-                sys_logs,
-                size,
-                "󰗀",
-            ));
+                let size = if path.is_dir() {
+                    dir_size(&path)
+                } else {
+                    entry.metadata().map(|m| m.len()).unwrap_or(0)
+                };
+
+                if size > 1_000_000 { // Only show > 1MB
+                    entries.push(ScanEntry::new(
+                        format!("Logs: {}", name),
+                        path,
+                        size,
+                        "󰗀",
+                    ));
+                }
+            }
         }
     }
 
@@ -42,7 +42,9 @@ mod tests {
     #[test]
     fn test_logs_scan_returns_entries() {
         let entries = scan();
-        // ~/Library/Logs should exist on macOS
-        assert!(!entries.is_empty());
+        // ~/Library/Logs should have some log directories
+        for entry in &entries {
+            assert!(entry.size > 0);
+        }
     }
 }

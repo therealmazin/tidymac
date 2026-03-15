@@ -85,6 +85,13 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
         return;
     }
 
+    // Show expanding indicator in title
+    let title_suffix = if app.space_expanding {
+        format!(" {} loading... ", app.spinner_char())
+    } else {
+        String::new()
+    };
+
     let max_size = app.space_visible.first().map(|e| e.size).unwrap_or(1);
 
     let items: Vec<ListItem> = app
@@ -143,7 +150,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let total: u64 = app.space_tree.iter().map(|n| n.size).sum();
     let list = List::new(items)
-        .block(block.title(format!(" Space Lens — {} total ", ByteSize(total))))
+        .block(block.title(format!(" Space Lens — {} total{}", ByteSize(total), title_suffix)))
         .highlight_style(
             Style::default()
                 .fg(theme::TEXT_PRIMARY)
