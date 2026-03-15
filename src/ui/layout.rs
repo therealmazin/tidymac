@@ -102,9 +102,10 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App) {
 fn draw_main(frame: &mut Frame, area: Rect, app: &mut App, stats: &SystemStats) {
     match app.screen {
         Screen::Home => super::home::draw(frame, area, app, stats),
-        Screen::Scan => super::scan::draw(frame, area, app),
-        Screen::Dev => super::dev::draw(frame, area, app),
+        Screen::SmartScan => super::smart_scan::draw(frame, area, app),
         Screen::Apps => super::apps::draw(frame, area, app),
+        Screen::SpaceLens => super::space_lens::draw(frame, area, app),
+        Screen::LargeOld => super::large_old::draw(frame, area, app),
         Screen::Config => super::config::draw(frame, area, app),
     }
 }
@@ -114,25 +115,46 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
         Screen::Home => vec![
             ("q", "Quit"), ("Tab", "Focus"), ("j/k", "Navigate"), ("x", "Kill Port"),
         ],
-        Screen::Scan | Screen::Dev => {
+        Screen::SmartScan => {
             if app.scanning {
                 vec![("q", "Quit"), ("Esc", "Sidebar")]
-            } else if app.scan_results.is_empty() {
+            } else if app.smart_scan_categories.is_empty() {
+                vec![("q", "Quit"), ("Tab", "Focus"), ("s", "Scan")]
+            } else {
+                vec![
+                    ("q", "Quit"), ("Tab", "Focus"), ("s", "Scan"),
+                    ("Space", "Toggle"), ("Enter", "Expand"), ("c", "Clean"),
+                ]
+            }
+        }
+        Screen::Apps => {
+            let view_name = match app.app_view {
+                crate::app::AppView::All => "All",
+                crate::app::AppView::Unused => "Unused",
+                crate::app::AppView::Leftovers => "Leftovers",
+            };
+            vec![
+                ("q", "Quit"), ("Tab", view_name), ("s", "Scan"),
+                ("d", "Uninstall"),
+            ]
+        }
+        Screen::SpaceLens => {
+            if app.space_visible.is_empty() {
+                vec![("q", "Quit"), ("Tab", "Focus"), ("s", "Scan")]
+            } else {
+                vec![
+                    ("q", "Quit"), ("Tab", "Focus"), ("s", "Scan"),
+                    ("Enter", "Expand"),
+                ]
+            }
+        }
+        Screen::LargeOld => {
+            if app.scan_results.is_empty() {
                 vec![("q", "Quit"), ("Tab", "Focus"), ("s", "Scan")]
             } else {
                 vec![
                     ("q", "Quit"), ("Tab", "Focus"), ("s", "Scan"),
                     ("Space", "Toggle"), ("c", "Clean"),
-                ]
-            }
-        }
-        Screen::Apps => {
-            if app.app_list.is_empty() && app.orphan_results.is_empty() {
-                vec![("q", "Quit"), ("Tab", "Focus"), ("s", "Scan Apps"), ("o", "Orphans")]
-            } else {
-                vec![
-                    ("q", "Quit"), ("Tab", "Focus"), ("s", "Scan Apps"),
-                    ("o", "Orphans"), ("d", "Uninstall"),
                 ]
             }
         }

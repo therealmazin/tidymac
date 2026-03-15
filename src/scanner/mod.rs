@@ -6,6 +6,9 @@ pub mod docker;
 pub mod node;
 pub mod cargo;
 pub mod apps;
+pub mod trash;
+pub mod space;
+pub mod large_old;
 
 use std::path::PathBuf;
 
@@ -25,7 +28,7 @@ impl ScanEntry {
             path,
             size,
             icon,
-            selected: true, // selected by default
+            selected: true,
         }
     }
 }

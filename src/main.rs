@@ -33,31 +33,53 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
     let mut stats = SystemStats::new();
 
     while app.running {
-        // Refresh stats on tick
         if app.last_tick.elapsed() >= app.tick_rate {
             stats.refresh();
             app.last_tick = std::time::Instant::now();
         }
 
-        // Check for scan completion
-        let mut received = None;
+        // Check for scan messages (may receive multiple per tick for progress updates)
+        let mut final_msg = None;
         if let Some(ref rx) = app.scan_receiver {
-            match rx.try_recv() {
-                Ok(msg) => received = Some(msg),
-                Err(mpsc::TryRecvError::Empty) => {}
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    app.scanning = false;
-                    app.scan_receiver = None;
-                    app.scan_status = "Scan failed".to_string();
+            loop {
+                match rx.try_recv() {
+                    Ok(ScanMessage::SmartScanProgress(step_name)) => {
+                        // Mark completed step
+                        for step in &mut app.scan_steps {
+                            if step.name == step_name {
+                                step.done = true;
+                                break;
+                            }
+                        }
+                    }
+                    Ok(msg) => {
+                        final_msg = Some(msg);
+                        break;
+                    }
+                    Err(mpsc::TryRecvError::Empty) => break,
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        app.scanning = false;
+                        app.scan_receiver = None;
+                        app.scan_status = "Scan failed".to_string();
+                        break;
+                    }
                 }
             }
         }
-        if let Some(msg) = received {
+        if let Some(msg) = final_msg {
             match msg {
+                ScanMessage::SmartScanProgress(_) => {} // handled above
                 ScanMessage::ScanResults(results) => {
                     app.scan_results = results;
                     if !app.scan_results.is_empty() {
                         app.scan_list_index = 0;
+                        app.scan_list_state.select(Some(0));
+                    }
+                }
+                ScanMessage::SmartScanResults(categories) => {
+                    app.smart_scan_categories = categories;
+                    app.smart_scan_index = 0;
+                    if !app.smart_scan_categories.is_empty() {
                         app.scan_list_state.select(Some(0));
                     }
                 }
@@ -70,10 +92,17 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
                 }
                 ScanMessage::OrphanResults(orphans) => {
                     app.orphan_results = orphans;
-                    app.show_orphans = true;
                     app.app_list_index = 0;
                     if !app.orphan_results.is_empty() {
                         app.orphan_list_state.select(Some(0));
+                    }
+                }
+                ScanMessage::SpaceTree(tree) => {
+                    app.space_tree = tree;
+                    app.rebuild_space_visible();
+                    app.space_list_index = 0;
+                    if !app.space_visible.is_empty() {
+                        app.space_list_state.select(Some(0));
                     }
                 }
             }
@@ -82,7 +111,6 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
             app.scan_status.clear();
         }
 
-        // Animate spinner
         if app.scanning {
             app.tick_spinner();
         }
@@ -112,18 +140,20 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
                         } else {
                             match key.code {
                                 KeyCode::Char('q') => app.quit(),
-                                KeyCode::Tab => app.toggle_focus(),
-                                KeyCode::Char('s') => {
-                                    match app.screen {
-                                        app::Screen::Scan => app.run_scan(),
-                                        app::Screen::Dev => app.run_dev_scan(),
-                                        app::Screen::Apps => app.scan_apps(),
-                                        _ => {}
+                                KeyCode::Tab => {
+                                    if app.screen == app::Screen::Apps && app.focus == Focus::Main {
+                                        app.cycle_app_view();
+                                    } else {
+                                        app.toggle_focus();
                                     }
                                 }
-                                KeyCode::Char('o') => {
-                                    if app.screen == app::Screen::Apps {
-                                        app.scan_orphan_apps();
+                                KeyCode::Char('s') => {
+                                    match app.screen {
+                                        app::Screen::SmartScan => app.run_smart_scan(),
+                                        app::Screen::Apps => app.scan_apps(),
+                                        app::Screen::SpaceLens => app.run_space_scan(),
+                                        app::Screen::LargeOld => app.run_large_old_scan(),
+                                        _ => {}
                                     }
                                 }
                                 KeyCode::Char('d') => {
@@ -143,43 +173,56 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
                                 }
                                 KeyCode::Char(' ') => {
                                     if app.focus == Focus::Main {
-                                        if app.screen == app::Screen::Config {
-                                            if app.config_index == 0 {
-                                                app.safe_mode = !app.safe_mode;
+                                        match app.screen {
+                                            app::Screen::Config => {
+                                                if app.config_index == 0 {
+                                                    app.safe_mode = !app.safe_mode;
+                                                }
                                             }
-                                        } else {
-                                            app.toggle_selected();
+                                            app::Screen::SmartScan => app.toggle_smart_scan_item(),
+                                            _ => app.toggle_selected(),
+                                        }
+                                    }
+                                }
+                                KeyCode::Enter => {
+                                    if app.focus == Focus::Main {
+                                        match app.screen {
+                                            app::Screen::SmartScan => app.toggle_smart_scan_expand(),
+                                            app::Screen::SpaceLens => app.toggle_space_expand(),
+                                            _ => {}
                                         }
                                     }
                                 }
                                 KeyCode::Up | KeyCode::Char('k') => {
                                     if app.focus == Focus::Sidebar {
                                         app.prev_sidebar();
-                                    } else if app.screen == app::Screen::Home {
-                                        app.prev_port(stats.listening_ports.len());
-                                    } else if app.screen == app::Screen::Apps {
-                                        app.prev_app();
-                                    } else if app.screen == app::Screen::Config {
-                                        if app.config_index > 0 {
-                                            app.config_index -= 1;
-                                        }
                                     } else {
-                                        app.prev_list_item();
+                                        match app.screen {
+                                            app::Screen::Home => app.prev_port(stats.listening_ports.len()),
+                                            app::Screen::SmartScan => app.prev_smart_scan_item(),
+                                            app::Screen::Apps => app.prev_app(),
+                                            app::Screen::SpaceLens => app.prev_space_item(),
+                                            app::Screen::Config => {
+                                                if app.config_index > 0 { app.config_index -= 1; }
+                                            }
+                                            _ => app.prev_list_item(),
+                                        }
                                     }
                                 }
                                 KeyCode::Down | KeyCode::Char('j') => {
                                     if app.focus == Focus::Sidebar {
                                         app.next_sidebar();
-                                    } else if app.screen == app::Screen::Home {
-                                        app.next_port(stats.listening_ports.len());
-                                    } else if app.screen == app::Screen::Apps {
-                                        app.next_app();
-                                    } else if app.screen == app::Screen::Config {
-                                        if app.config_index < 1 {
-                                            app.config_index += 1;
-                                        }
                                     } else {
-                                        app.next_list_item();
+                                        match app.screen {
+                                            app::Screen::Home => app.next_port(stats.listening_ports.len()),
+                                            app::Screen::SmartScan => app.next_smart_scan_item(),
+                                            app::Screen::Apps => app.next_app(),
+                                            app::Screen::SpaceLens => app.next_space_item(),
+                                            app::Screen::Config => {
+                                                if app.config_index < 1 { app.config_index += 1; }
+                                            }
+                                            _ => app.next_list_item(),
+                                        }
                                     }
                                 }
                                 KeyCode::Esc => {

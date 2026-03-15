@@ -4,7 +4,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, List, ListItem, Paragraph},
 };
 
-use crate::app::App;
+use crate::app::{App, AppView};
 use super::theme;
 
 pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
@@ -13,6 +13,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
         .margin(1)
         .constraints([
             Constraint::Length(2), // Title
+            Constraint::Length(1), // Tab bar
             Constraint::Min(0),   // List
         ])
         .split(area);
@@ -25,30 +26,83 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
-            "  Manage installed apps and find orphaned files.",
+            "  Manage installed apps, find unused and leftover files.",
             Style::default().fg(theme::TEXT_SECONDARY),
         )),
     ]);
     frame.render_widget(title, chunks[0]);
+
+    // Tab bar
+    let tabs = vec![
+        ("All", AppView::All),
+        ("Unused", AppView::Unused),
+        ("Leftovers", AppView::Leftovers),
+    ];
+    let tab_spans: Vec<Span> = tabs
+        .iter()
+        .flat_map(|(name, view)| {
+            let style = if *view == app.app_view {
+                Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme::TEXT_SECONDARY)
+            };
+            vec![
+                Span::styled(format!("  {} ", name), style),
+                Span::styled("│", Style::default().fg(theme::BORDER_NORMAL)),
+            ]
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(Line::from(tab_spans)), chunks[1]);
 
     if app.scanning {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(theme::BORDER_NORMAL))
-            .title(if app.show_orphans { " Orphaned Files " } else { " Installed Apps " });
-        let spinner = Paragraph::new(format!(
-            "  {} {}",
-            app.spinner_char(),
-            app.scan_status
-        ))
-        .style(Style::default().fg(theme::SPINNER_COLOR))
-        .block(block);
-        frame.render_widget(spinner, chunks[1]);
-    } else if app.show_orphans {
-        draw_orphans(frame, chunks[1], app);
-    } else {
-        draw_app_list(frame, chunks[1], app);
+            .title(" Scanning... ");
+        let inner = block.inner(chunks[2]);
+        frame.render_widget(block, chunks[2]);
+
+        let step_constraints: Vec<Constraint> = app.scan_steps
+            .iter()
+            .map(|_| Constraint::Length(1))
+            .chain(std::iter::once(Constraint::Min(0)))
+            .collect();
+        let step_rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(step_constraints)
+            .split(inner);
+
+        for (i, step) in app.scan_steps.iter().enumerate() {
+            if i >= step_rows.len() - 1 { break; }
+            let line = if step.done {
+                Line::from(vec![
+                    Span::styled("  ✓ ", Style::default().fg(theme::CPU_GREEN)),
+                    Span::styled(&step.name, Style::default().fg(theme::CPU_GREEN)),
+                ])
+            } else {
+                let is_current = (i == 0 || app.scan_steps[i - 1].done) && !step.done;
+                if is_current {
+                    Line::from(vec![
+                        Span::styled(format!("  {} ", app.spinner_char()), Style::default().fg(theme::SPINNER_COLOR)),
+                        Span::styled(&step.name, Style::default().fg(theme::SPINNER_COLOR)),
+                    ])
+                } else {
+                    Line::from(vec![
+                        Span::styled("    ", Style::default().fg(theme::TEXT_SECONDARY)),
+                        Span::styled(&step.name, Style::default().fg(theme::TEXT_SECONDARY)),
+                    ])
+                }
+            };
+            frame.render_widget(Paragraph::new(line), step_rows[i]);
+        }
+        return;
+    }
+
+    match app.app_view {
+        AppView::All => draw_app_list(frame, chunks[2], app),
+        AppView::Unused => draw_unused(frame, chunks[2], app),
+        AppView::Leftovers => draw_orphans(frame, chunks[2], app),
     }
 }
 
@@ -61,7 +115,7 @@ fn draw_app_list(frame: &mut Frame, area: Rect, app: &mut App) {
     if app.app_list.is_empty() {
         let empty = Paragraph::new("  Press 's' to scan installed applications.")
             .style(Style::default().fg(theme::TEXT_SECONDARY))
-            .block(block.title(" Installed Apps "));
+            .block(block.title(" All Apps "));
         frame.render_widget(empty, area);
         return;
     }
@@ -81,7 +135,7 @@ fn draw_app_list(frame: &mut Frame, area: Rect, app: &mut App) {
         .collect();
 
     let list = List::new(items)
-        .block(block.title(format!(" Installed Apps ({}) ", app.app_list.len())))
+        .block(block.title(format!(" All Apps ({}) ", app.app_list.len())))
         .highlight_style(
             Style::default()
                 .fg(theme::TEXT_PRIMARY)
@@ -90,6 +144,27 @@ fn draw_app_list(frame: &mut Frame, area: Rect, app: &mut App) {
         )
         .highlight_symbol("▸");
     frame.render_stateful_widget(list, area, &mut app.app_list_state);
+}
+
+fn draw_unused(frame: &mut Frame, area: Rect, app: &mut App) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme::BORDER_NORMAL));
+
+    if app.app_list.is_empty() {
+        let empty = Paragraph::new("  Press 's' to scan apps first, then switch to Unused.")
+            .style(Style::default().fg(theme::TEXT_SECONDARY))
+            .block(block.title(" Unused Apps "));
+        frame.render_widget(empty, area);
+        return;
+    }
+
+    // TODO: Filter by last used date via mdls — for now show placeholder
+    let empty = Paragraph::new("  Unused app detection coming soon.\n  Apps not opened in 6+ months will appear here.")
+        .style(Style::default().fg(theme::TEXT_SECONDARY))
+        .block(block.title(" Unused Apps "));
+    frame.render_widget(empty, area);
 }
 
 fn draw_orphans(frame: &mut Frame, area: Rect, app: &mut App) {
@@ -101,7 +176,7 @@ fn draw_orphans(frame: &mut Frame, area: Rect, app: &mut App) {
     if app.orphan_results.is_empty() {
         let empty = Paragraph::new("  No orphaned files found. Your system is clean!")
             .style(Style::default().fg(theme::CPU_GREEN))
-            .block(block.title(" Orphaned Files "));
+            .block(block.title(" Leftovers "));
         frame.render_widget(empty, area);
         return;
     }
@@ -123,7 +198,7 @@ fn draw_orphans(frame: &mut Frame, area: Rect, app: &mut App) {
         .collect();
 
     let list = List::new(items)
-        .block(block.title(format!(" Orphaned Files ({}) ", app.orphan_results.len())))
+        .block(block.title(format!(" Leftovers ({}) ", app.orphan_results.len())))
         .highlight_style(
             Style::default()
                 .fg(theme::TEXT_PRIMARY)
