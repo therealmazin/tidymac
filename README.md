@@ -27,6 +27,25 @@
 
 ## Installation
 
+### Homebrew (recommended)
+
+```bash
+brew tap therealmazin/tidymac
+brew install tidymac
+```
+
+### npx (no install needed)
+
+```bash
+npx tidymac
+```
+
+### npm (global install)
+
+```bash
+npm install -g tidymac
+```
+
 ### From source
 
 ```bash
@@ -36,12 +55,6 @@ cargo build --release
 ```
 
 The binary will be at `target/release/tidymac`.
-
-### Run directly
-
-```bash
-cargo run --release
-```
 
 ## Usage
 

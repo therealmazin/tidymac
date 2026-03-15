@@ -1,0 +1,12 @@
+{
+  "name": "@tidymac/darwin-arm64",
+  "version": "0.1.0",
+  "description": "tidymac macOS ARM64 (Apple Silicon) binary",
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/therealmazin/tidymac"
+  }
+}

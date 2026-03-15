@@ -1,0 +1,12 @@
+{
+  "name": "@tidymac/darwin-x64",
+  "version": "0.1.0",
+  "description": "tidymac macOS x64 (Intel) binary",
+  "os": ["darwin"],
+  "cpu": ["x64"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/therealmazin/tidymac"
+  }
+}

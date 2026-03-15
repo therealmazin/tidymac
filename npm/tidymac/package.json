@@ -1,0 +1,29 @@
+{
+  "name": "tidymac",
+  "version": "0.1.0",
+  "description": "A lightweight TUI system cleaner for macOS, written in Rust",
+  "bin": {
+    "tidymac": "bin/index.js"
+  },
+  "optionalDependencies": {
+    "@tidymac/darwin-arm64": "0.1.0",
+    "@tidymac/darwin-x64": "0.1.0"
+  },
+  "keywords": [
+    "macos",
+    "system-cleaner",
+    "tui",
+    "terminal",
+    "rust",
+    "cleanup",
+    "cache",
+    "disk-space"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/therealmazin/tidymac"
+  },
+  "license": "MIT",
+  "author": "Mazin",
+  "homepage": "https://github.com/therealmazin/tidymac"
+}
