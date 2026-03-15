@@ -109,23 +109,14 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
                         app.orphan_list_state.select(Some(0));
                     }
                 }
-                ScanMessage::SpaceTree(tree) => {
+                ScanMessage::SpaceTreeWithCache(tree, cache) => {
                     app.space_tree = tree;
+                    app.space_size_cache = cache;
                     app.rebuild_space_visible();
                     app.space_list_index = 0;
                     if !app.space_visible.is_empty() {
                         app.space_list_state.select(Some(0));
                     }
-                }
-                ScanMessage::SpaceChildrenLoaded { tree_path, children } => {
-                    if let Some(node) = crate::scanner::space::get_node_mut(&mut app.space_tree, &tree_path) {
-                        node.children = children;
-                        node.children_loaded = true;
-                        node.expanded = true;
-                    }
-                    app.space_expanding = false;
-                    app.rebuild_space_visible();
-                    app.space_list_state.select(Some(app.space_list_index));
                 }
             }
             app.scanning = false;

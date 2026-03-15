@@ -804,6 +804,7 @@ dependencies = [
  "dirs",
  "jwalk",
  "ratatui",
+ "rayon",
  "sysinfo",
  "tokio",
  "trash",

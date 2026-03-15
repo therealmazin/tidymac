@@ -6,6 +6,8 @@ use ratatui::widgets::ListState;
 use crate::scanner::ScanEntry;
 use crate::scanner::apps::AppInfo;
 use crate::scanner::space::{SpaceNode, SpaceVisibleItem};
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 const SPINNER_CHARS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
@@ -90,11 +92,7 @@ pub enum ScanMessage {
     CleanDone,
     AppList(Vec<AppInfo>),
     OrphanResults(Vec<ScanEntry>),
-    SpaceTree(Vec<SpaceNode>),
-    SpaceChildrenLoaded {
-        tree_path: Vec<usize>,
-        children: Vec<SpaceNode>,
-    },
+    SpaceTreeWithCache(Vec<SpaceNode>, HashMap<PathBuf, u64>),
 }
 
 pub struct App {
@@ -129,6 +127,7 @@ pub struct App {
     pub space_list_index: usize,
     pub space_list_state: ListState,
     pub space_expanding: bool,
+    pub space_size_cache: HashMap<PathBuf, u64>,
     // Confirm dialog + cleaning progress
     pub confirm_kind: ConfirmKind,
     pub last_clean_results: Vec<String>,
@@ -179,6 +178,7 @@ impl App {
             space_list_index: 0,
             space_list_state: ListState::default(),
             space_expanding: false,
+            space_size_cache: HashMap::new(),
             confirm_kind: ConfirmKind::None,
             last_clean_results: Vec::new(),
             clean_progress: 0,
@@ -476,25 +476,24 @@ impl App {
         self.scanning = true;
         self.space_tree.clear();
         self.space_visible.clear();
+        self.space_size_cache.clear();
         self.space_list_index = 0;
         self.space_list_state.select(None);
         self.scan_status = "Scanning disk usage...".to_string();
 
         self.scan_steps = vec![
-            ScanStep { name: "Reading home directory...".to_string(), done: false },
-            ScanStep { name: "Calculating folder sizes...".to_string(), done: false },
-            ScanStep { name: "Sorting by size...".to_string(), done: false },
+            ScanStep { name: "Walking file system...".to_string(), done: false },
+            ScanStep { name: "Building directory tree...".to_string(), done: false },
         ];
 
         let (tx, rx) = mpsc::channel();
         self.scan_receiver = Some(rx);
 
         std::thread::spawn(move || {
-            let _ = tx.send(ScanMessage::SmartScanProgress("Reading home directory...".to_string()));
-            let tree = crate::scanner::space::scan_home_tree();
-            let _ = tx.send(ScanMessage::SmartScanProgress("Calculating folder sizes...".to_string()));
-            let _ = tx.send(ScanMessage::SmartScanProgress("Sorting by size...".to_string()));
-            let _ = tx.send(ScanMessage::SpaceTree(tree));
+            let _ = tx.send(ScanMessage::SmartScanProgress("Walking file system...".to_string()));
+            let (tree, cache) = crate::scanner::space::scan_home_tree_with_cache();
+            let _ = tx.send(ScanMessage::SmartScanProgress("Building directory tree...".to_string()));
+            let _ = tx.send(ScanMessage::SpaceTreeWithCache(tree, cache));
         });
     }
 
@@ -503,9 +502,6 @@ impl App {
     }
 
     pub fn toggle_space_expand(&mut self) {
-        if self.space_expanding {
-            return; // already loading children
-        }
         if let Some(item) = self.space_visible.get(self.space_list_index) {
             if !item.is_dir {
                 return;
@@ -513,45 +509,20 @@ impl App {
             let tree_path = item.tree_path.clone();
             if let Some(node) = crate::scanner::space::get_node_mut(&mut self.space_tree, &tree_path) {
                 if node.expanded {
-                    // Collapse is instant — no IO needed
                     node.expanded = false;
-                    self.rebuild_space_visible();
-                    if self.space_list_index >= self.space_visible.len() {
-                        self.space_list_index = self.space_visible.len().saturating_sub(1);
-                    }
-                    self.space_list_state.select(Some(self.space_list_index));
-                } else if node.children_loaded {
-                    // Already cached — instant expand
-                    node.expanded = true;
-                    self.rebuild_space_visible();
-                    self.space_list_state.select(Some(self.space_list_index));
                 } else {
-                    // Need to load children asynchronously
-                    self.space_expanding = true;
-                    let path = node.path.clone();
-                    let tp = tree_path.clone();
-
-                    let (tx, rx) = mpsc::channel();
-                    self.scan_receiver = Some(rx);
-
-                    std::thread::spawn(move || {
-                        let mut temp_node = crate::scanner::space::SpaceNode {
-                            name: String::new(),
-                            path: path,
-                            size: 0,
-                            is_dir: true,
-                            expanded: false,
-                            children: Vec::new(),
-                            children_loaded: false,
-                        };
-                        temp_node.load_children();
-                        let _ = tx.send(ScanMessage::SpaceChildrenLoaded {
-                            tree_path: tp,
-                            children: temp_node.children,
-                        });
-                    });
+                    // Load children from cache — instant, no disk IO
+                    if !node.children_loaded {
+                        node.load_children_from_cache(&self.space_size_cache);
+                    }
+                    node.expanded = true;
                 }
             }
+            self.rebuild_space_visible();
+            if self.space_list_index >= self.space_visible.len() {
+                self.space_list_index = self.space_visible.len().saturating_sub(1);
+            }
+            self.space_list_state.select(Some(self.space_list_index));
         }
     }
 
