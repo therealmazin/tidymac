@@ -276,9 +276,6 @@ impl App {
         let screens = Screen::all();
         self.sidebar_index = (self.sidebar_index + 1) % screens.len();
         self.screen = screens[self.sidebar_index];
-        self.scan_results.clear();
-        self.scan_list_index = 0;
-        self.scan_list_state.select(None);
     }
 
     pub fn prev_sidebar(&mut self) {
@@ -289,9 +286,6 @@ impl App {
             self.sidebar_index -= 1;
         }
         self.screen = screens[self.sidebar_index];
-        self.scan_results.clear();
-        self.scan_list_index = 0;
-        self.scan_list_state.select(None);
     }
 
     pub fn toggle_focus(&mut self) {
