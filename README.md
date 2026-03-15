@@ -1,12 +1,18 @@
-# tidymac
+<p align="center">
+  <img src="tidymac.png" alt="tidymac" width="200">
+</p>
 
-A lightweight TUI system cleaner for macOS, written in Rust.
+<h1 align="center">tidymac</h1>
 
-Clean caches, dev tool artifacts, manage apps, monitor system resources, and kill rogue ports — all from your terminal.
+<p align="center">A lightweight TUI system cleaner for macOS, written in Rust.</p>
 
-![Rust](https://img.shields.io/badge/rust-stable-orange)
-![Platform](https://img.shields.io/badge/platform-macOS-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+<p align="center">Clean caches, dev tool artifacts, manage apps, monitor system resources, and kill rogue ports — all from your terminal.</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/rust-stable-orange" alt="Rust">
+  <img src="https://img.shields.io/badge/platform-macOS-blue" alt="Platform">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+</p>
 
 ## Features
 
