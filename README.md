@@ -14,6 +14,8 @@
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
 
+> **Disclaimer:** tidymac is an experimental terminal application and may contain bugs. All deletions are moved to macOS Trash (recoverable), but please use with caution. Always review items before cleaning. We recommend keeping Safe Mode enabled until you're comfortable with the tool.
+
 ## Features
 
 - **System Monitor** — CPU graph with per-core usage, memory breakdown, disk usage, all updating in real-time
