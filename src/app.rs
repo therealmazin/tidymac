@@ -94,7 +94,7 @@ impl Screen {
             Screen::Apps => "󰀲 Apps",
             Screen::SpaceLens => "󰋊 Space Lens",
             Screen::LargeOld => "󰱼 Large & Old",
-            Screen::Settings => " Settings",
+            Screen::Settings => "󰒓 Settings",
         }
     }
 }
