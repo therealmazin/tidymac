@@ -144,7 +144,7 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
             } else {
                 vec![
                     ("q", "Quit"), ("Tab", "Focus"), ("s", "Scan"),
-                    ("Enter", "Expand"),
+                    ("Enter", "Expand"), ("d", "Delete"),
                 ]
             }
         }
@@ -190,6 +190,7 @@ fn draw_confirm_dialog(frame: &mut Frame, app: &App) {
         ConfirmKind::CleanDone => draw_clean_done(frame, app),
         ConfirmKind::UninstallApp => draw_uninstall_confirm(frame, app),
         ConfirmKind::KillPort => draw_kill_port_confirm(frame, app),
+        ConfirmKind::DeleteSpaceItem => draw_delete_space_confirm(frame, app),
         ConfirmKind::None => {}
     }
 }
@@ -563,6 +564,67 @@ fn draw_kill_port_confirm(frame: &mut Frame, app: &App) {
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(theme::CRIT_RED))
             .title(" Kill Port ")
+            .title_style(Style::default().fg(theme::CRIT_RED).add_modifier(Modifier::BOLD))
+            .style(Style::default().bg(Color::Rgb(30, 30, 35))),
+    );
+
+    frame.render_widget(dialog, popup_area);
+}
+
+fn draw_delete_space_confirm(frame: &mut Frame, app: &App) {
+    let Some((ref name, ref path, size, _)) = app.delete_space_info else {
+        return;
+    };
+
+    let area = frame.area();
+    let popup_width = 56.min(area.width - 4);
+    let popup_height = 10u16.min(area.height - 4);
+
+    let popup_area = Rect::new(
+        (area.width - popup_width) / 2,
+        (area.height - popup_height) / 2,
+        popup_width,
+        popup_height,
+    );
+
+    frame.render_widget(Clear, popup_area);
+
+    let path_str = path.to_string_lossy();
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("  Delete {}?", name),
+            Style::default().fg(theme::CRIT_RED).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Size: ", Style::default().fg(theme::TEXT_SECONDARY)),
+            Span::styled(ByteSize(size).to_string(), Style::default().fg(theme::WARN_YELLOW)),
+        ]),
+        Line::from(Span::styled(
+            format!("  {}", path_str),
+            Style::default().fg(theme::TEXT_SECONDARY),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Will be moved to Trash (recoverable).",
+            Style::default().fg(theme::TEXT_SECONDARY),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Enter ", Style::default().fg(theme::CRIT_RED).add_modifier(Modifier::BOLD)),
+            Span::styled("Delete  ", Style::default().fg(theme::TEXT_SECONDARY)),
+            Span::styled("Esc ", Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)),
+            Span::styled("Cancel", Style::default().fg(theme::TEXT_SECONDARY)),
+        ]),
+    ];
+
+    let dialog = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme::CRIT_RED))
+            .title(" Delete Item ")
             .title_style(Style::default().fg(theme::CRIT_RED).add_modifier(Modifier::BOLD))
             .style(Style::default().bg(Color::Rgb(30, 30, 35))),
     );

@@ -48,7 +48,9 @@ mod tests {
 
     #[test]
     fn test_protected_path_rejected() {
-        let result = move_to_trash(Path::new("/Users/mazin/Documents/important"));
+        let home = dirs::home_dir().unwrap();
+        // Can't delete the Documents directory itself
+        let result = move_to_trash(&home.join("Documents"));
         assert!(matches!(result, Err(CleanError::ProtectedPath(_))));
     }
 

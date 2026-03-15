@@ -64,7 +64,7 @@ pub fn scan() -> Vec<ScanEntry> {
             let icon = file_icon(&name);
             let age_str = format_age(age);
 
-            results.push(ScanEntry::new(
+            results.push(ScanEntry::new_unselected(
                 format!("{} ({})", name, age_str),
                 entry.path().to_path_buf(),
                 size,

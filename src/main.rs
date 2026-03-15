@@ -154,6 +154,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
                                             ConfirmKind::CleanScan => app.confirm_clean(),
                                             ConfirmKind::UninstallApp => app.confirm_uninstall(),
                                             ConfirmKind::KillPort => app.confirm_kill_port(),
+                                    ConfirmKind::DeleteSpaceItem => app.confirm_delete_space_item(),
                                             _ => {}
                                         }
                                     }
@@ -186,8 +187,12 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
                                     }
                                 }
                                 KeyCode::Char('d') => {
-                                    if app.screen == app::Screen::Apps && app.focus == Focus::Main {
-                                        app.request_uninstall();
+                                    if app.focus == Focus::Main {
+                                        match app.screen {
+                                            app::Screen::Apps => app.request_uninstall(),
+                                            app::Screen::SpaceLens => app.request_delete_space_item(),
+                                            _ => {}
+                                        }
                                     }
                                 }
                                 KeyCode::Char('x') => {

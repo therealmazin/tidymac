@@ -57,8 +57,9 @@ pub enum ConfirmKind {
     CleanScan,
     UninstallApp,
     KillPort,
-    Cleaning,   // progress bar during clean
-    CleanDone,  // finished summary
+    Cleaning,          // progress bar during clean
+    CleanDone,         // finished summary
+    DeleteSpaceItem,   // confirm delete from Space Lens
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,6 +142,7 @@ pub struct App {
     pub port_list_index: usize,
     pub port_list_state: ListState,
     pub kill_port_info: Option<crate::system::PortInfo>,
+    pub delete_space_info: Option<(String, PathBuf, u64, Vec<usize>)>, // (name, path, size, tree_path)
     // Async scan state
     pub scan_receiver: Option<mpsc::Receiver<ScanMessage>>,
     pub scan_status: String,
@@ -189,6 +191,7 @@ impl App {
             port_list_index: 0,
             port_list_state: ListState::default(),
             kill_port_info: None,
+            delete_space_info: None,
             scan_receiver: None,
             scan_status: String::new(),
             spinner_frame: 0,
@@ -729,6 +732,72 @@ impl App {
     pub fn cancel_confirm(&mut self) {
         self.confirm_kind = ConfirmKind::None;
         self.kill_port_info = None;
+        self.delete_space_info = None;
+    }
+
+    // Space Lens delete
+    pub fn request_delete_space_item(&mut self) {
+        if let Some(item) = self.space_visible.get(self.space_list_index) {
+            let tree_path = item.tree_path.clone();
+            if let Some(node) = crate::scanner::space::get_node_mut(&mut self.space_tree, &tree_path) {
+                self.delete_space_info = Some((
+                    node.name.clone(),
+                    node.path.clone(),
+                    node.size,
+                    tree_path,
+                ));
+                self.confirm_kind = ConfirmKind::DeleteSpaceItem;
+            }
+        }
+    }
+
+    pub fn confirm_delete_space_item(&mut self) {
+        if let Some((_, ref path, size, ref tree_path)) = self.delete_space_info {
+            let _ = crate::cleaner::move_to_trash(path);
+
+            // Subtract size from all ancestor directories in cache
+            let path_clone = path.clone();
+            self.space_size_cache.remove(&path_clone);
+            let mut current = path_clone.as_path();
+            while let Some(parent) = current.parent() {
+                if let Some(parent_size) = self.space_size_cache.get_mut(&parent.to_path_buf()) {
+                    *parent_size = parent_size.saturating_sub(size);
+                }
+                current = parent;
+            }
+
+            // Remove node from tree
+            let tp = tree_path.clone();
+            if tp.len() == 1 {
+                // Top-level node
+                let idx = tp[0];
+                if idx < self.space_tree.len() {
+                    self.space_tree.remove(idx);
+                }
+            } else if tp.len() > 1 {
+                // Find parent, remove child
+                let parent_path = &tp[..tp.len() - 1];
+                let child_idx = *tp.last().unwrap();
+                if let Some(parent_node) = crate::scanner::space::get_node_mut(&mut self.space_tree, parent_path) {
+                    if child_idx < parent_node.children.len() {
+                        parent_node.children.remove(child_idx);
+                        parent_node.size = parent_node.size.saturating_sub(size);
+                    }
+                }
+            }
+        }
+
+        self.delete_space_info = None;
+        self.confirm_kind = ConfirmKind::None;
+
+        // Rebuild visible items — instant, no disk IO
+        self.rebuild_space_visible();
+        if self.space_list_index >= self.space_visible.len() {
+            self.space_list_index = self.space_visible.len().saturating_sub(1);
+        }
+        if !self.space_visible.is_empty() {
+            self.space_list_state.select(Some(self.space_list_index));
+        }
     }
 
     // Port navigation

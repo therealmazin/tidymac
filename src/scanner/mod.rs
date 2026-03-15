@@ -31,6 +31,16 @@ impl ScanEntry {
             selected: true,
         }
     }
+
+    pub fn new_unselected(name: String, path: PathBuf, size: u64, icon: &'static str) -> Self {
+        Self {
+            name,
+            path,
+            size,
+            icon,
+            selected: false,
+        }
+    }
 }
 
 /// Compute total size of a directory recursively (parallel via jwalk)
@@ -44,34 +54,30 @@ pub fn dir_size(path: &std::path::Path) -> u64 {
         .sum()
 }
 
-/// Protected paths that must never be deleted
+/// Protected paths that must never be deleted.
+/// Only blocks deleting the directory itself, not files inside it.
 pub fn is_protected(path: &std::path::Path) -> bool {
-    let path_str = path.to_string_lossy();
-    let protected = [
-        "/Documents",
-        "/Desktop",
-        "/Photos",
-        "/Pictures",
-        "/Movies",
-        "/Music",
-        "/.ssh",
-        "/.gnupg",
-        "/.env",
-        "/.config",
-        "/.zshrc",
-        "/.bashrc",
-        "/Library/Preferences",
-        "/Library/Application Support",
-        "/Library/Saved Application State",
-        "/Library/LaunchAgents",
-        "/Library/LaunchDaemons",
-        "/Library/Keychains",
-        "/oh-my-posh",
-        "/oh-my-zsh",
-        "/powerlevel10k",
-        "/starship",
+    let home = dirs::home_dir().unwrap_or_default();
+    let protected_dirs = [
+        home.join("Documents"),
+        home.join("Desktop"),
+        home.join("Photos"),
+        home.join("Pictures"),
+        home.join("Movies"),
+        home.join("Music"),
+        home.join("Downloads"),
+        home.join(".ssh"),
+        home.join(".gnupg"),
+        home.join(".config"),
+        home.join("Library"),
+        home.join("Library/Preferences"),
+        home.join("Library/Application Support"),
+        home.join("Library/Saved Application State"),
+        home.join("Library/LaunchAgents"),
+        home.join("Library/LaunchDaemons"),
+        home.join("Library/Keychains"),
     ];
-    protected.iter().any(|p| path_str.contains(p))
+    protected_dirs.iter().any(|p| path == p.as_path())
 }
 
 #[cfg(test)]
@@ -81,10 +87,17 @@ mod tests {
 
     #[test]
     fn test_is_protected() {
-        assert!(is_protected(Path::new("/Users/mazin/Documents/foo")));
-        assert!(is_protected(Path::new("/Users/mazin/.ssh/id_rsa")));
-        assert!(is_protected(Path::new("/Users/mazin/.gnupg/keys")));
-        assert!(!is_protected(Path::new("/Users/mazin/Library/Caches/foo")));
+        let home = dirs::home_dir().unwrap();
+        // Top-level protected dirs — can't delete these
+        assert!(is_protected(&home.join("Documents")));
+        assert!(is_protected(&home.join(".ssh")));
+        assert!(is_protected(&home.join(".gnupg")));
+        assert!(is_protected(&home.join("Library")));
+        // Files INSIDE protected dirs — can delete these
+        assert!(!is_protected(&home.join("Documents/movie.mp4")));
+        assert!(!is_protected(&home.join("Library/Caches/foo")));
+        // Random paths — not protected
+        assert!(!is_protected(Path::new("/tmp/test")));
     }
 
     #[test]
