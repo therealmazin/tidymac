@@ -1,7 +1,7 @@
 use bytesize::ByteSize;
 use ratatui::{
     prelude::*,
-    widgets::{Block, BorderType, Borders, LineGauge, List, ListItem, Paragraph, Sparkline},
+    widgets::{Block, BorderType, Borders, List, ListItem, Paragraph, Sparkline},
 };
 
 use crate::app::App;
@@ -12,8 +12,8 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App, stats: &SystemStats) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage(55), // CPU area
-            Constraint::Percentage(45), // Memory+Disks | Ports
+            Constraint::Percentage(50), // CPU area
+            Constraint::Percentage(50), // Bottom: left (mem+net) | right (ports)
         ])
         .split(area);
 
@@ -21,10 +21,19 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App, stats: &SystemStats) {
 
     let bottom = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
         .split(chunks[1]);
 
-    draw_mem_disk(frame, bottom[0], stats);
+    // Left: Memory+Disks on top, Network at bottom
+    let left = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(9)])
+        .split(bottom[0]);
+
+    draw_mem_disk(frame, left[0], stats);
+    draw_network(frame, left[1], stats);
+
+    // Right: Listening Ports (full height)
     draw_ports(frame, bottom[1], app, stats);
 }
 
@@ -37,7 +46,6 @@ fn draw_cpu_area(frame: &mut Frame, area: Rect, stats: &SystemStats) {
         .constraints([Constraint::Min(0), Constraint::Length(core_panel_width)])
         .split(area);
 
-    // CPU sparkline graph
     let cpu_block = Block::default()
         .title(format!(" 󰻠 CPU {:.0}% · {} cores ", stats.cpu_usage(), stats.cpu_count()))
         .title_style(Style::default().fg(theme::CPU_GREEN).add_modifier(Modifier::BOLD))
@@ -71,7 +79,6 @@ fn draw_core_panel(frame: &mut Frame, area: Rect, cores: &[f32]) {
 
     let max_rows = inner.height as usize;
     let cores_to_show = cores.len().min(max_rows);
-
     if cores_to_show == 0 {
         return;
     }
@@ -105,10 +112,25 @@ fn draw_core_panel(frame: &mut Frame, area: Rect, cores: &[f32]) {
             Span::styled("░".repeat(empty), Style::default().fg(theme::BG_BAR)),
             Span::styled(pct_str, Style::default().fg(color)),
         ]);
-
-        let p = Paragraph::new(line);
-        frame.render_widget(p, rows[i]);
+        frame.render_widget(Paragraph::new(line), rows[i]);
     }
+}
+
+/// Render a single-line bar: " Label  ████░░░░  63% "
+fn render_bar(frame: &mut Frame, area: Rect, label: &str, pct: f64, color: Color) {
+    let label_width = 7u16;
+    let pct_width = 5u16;
+    let bar_width = area.width.saturating_sub(label_width + pct_width + 2) as usize;
+    let filled = ((pct / 100.0) * bar_width as f64) as usize;
+    let empty = bar_width.saturating_sub(filled);
+
+    let line = Line::from(vec![
+        Span::styled(format!(" {:<6}", label), Style::default().fg(theme::TEXT_PRIMARY)),
+        Span::styled("█".repeat(filled), Style::default().fg(color)),
+        Span::styled("░".repeat(empty), Style::default().fg(theme::BG_BAR)),
+        Span::styled(format!(" {:>3.0}%", pct), Style::default().fg(color)),
+    ]);
+    frame.render_widget(Paragraph::new(line), area);
 }
 
 fn draw_mem_disk(frame: &mut Frame, area: Rect, stats: &SystemStats) {
@@ -124,18 +146,22 @@ fn draw_mem_disk(frame: &mut Frame, area: Rect, stats: &SystemStats) {
     frame.render_widget(block, area);
 
     let disks = stats.disk_usage();
-    let disk_rows = disks.len() * 2; // label + gauge per disk
 
-    let mut constraints = vec![
-        Constraint::Length(1), // Used
-        Constraint::Length(1), // Available
-        Constraint::Length(1), // Swap
+    // Use root disk only (/) for the Disk bar
+    let root_disk = disks.iter().find(|d| d.mount_point == "/");
+
+    let constraints = vec![
+        Constraint::Length(1), // Used bar
+        Constraint::Length(1), // Used detail
+        Constraint::Length(1), // Avail bar
+        Constraint::Length(1), // Avail detail
+        Constraint::Length(1), // Swap bar
+        Constraint::Length(1), // Swap detail
         Constraint::Length(1), // separator
+        Constraint::Length(1), // Disk bar
+        Constraint::Length(1), // Disk detail
+        Constraint::Min(0),
     ];
-    for _ in 0..disk_rows {
-        constraints.push(Constraint::Length(1));
-    }
-    constraints.push(Constraint::Min(0));
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -143,90 +169,109 @@ fn draw_mem_disk(frame: &mut Frame, area: Rect, stats: &SystemStats) {
         .split(inner);
 
     let total = stats.memory_total();
-
-    // Used
     let used = stats.memory_used();
-    let used_ratio = if total > 0 { used as f64 / total as f64 } else { 0.0 };
-    let used_color = if mem_pct > 80.0 {
-        theme::CRIT_RED
-    } else if mem_pct > 60.0 {
-        theme::WARN_YELLOW
-    } else {
-        theme::MEM_BLUE
-    };
+    let used_pct = if total > 0 { (used as f64 / total as f64) * 100.0 } else { 0.0 };
+    let used_color = if used_pct > 80.0 { theme::CRIT_RED } else if used_pct > 60.0 { theme::WARN_YELLOW } else { theme::MEM_BLUE };
 
-    let used_gauge = LineGauge::default()
-        .label(format!(" Used:  {} / {}", ByteSize(used), ByteSize(total)))
-        .ratio(used_ratio.min(1.0))
-        .filled_style(Style::default().fg(used_color))
-        .unfilled_style(Style::default().fg(theme::BG_BAR))
-        .line_set(symbols::line::THICK);
-    frame.render_widget(used_gauge, rows[0]);
+    render_bar(frame, rows[0], "Used", used_pct, used_color);
+    let used_detail = Paragraph::new(format!("        {} / {}", ByteSize(used), ByteSize(total)))
+        .style(Style::default().fg(theme::TEXT_SECONDARY));
+    frame.render_widget(used_detail, rows[1]);
 
-    // Available
     let avail = stats.memory_available();
-    let avail_ratio = if total > 0 { avail as f64 / total as f64 } else { 0.0 };
+    let avail_pct = if total > 0 { (avail as f64 / total as f64) * 100.0 } else { 0.0 };
+    render_bar(frame, rows[2], "Avail", avail_pct, Color::Rgb(148, 226, 213));
+    let avail_detail = Paragraph::new(format!("        {}", ByteSize(avail)))
+        .style(Style::default().fg(theme::TEXT_SECONDARY));
+    frame.render_widget(avail_detail, rows[3]);
 
-    let avail_gauge = LineGauge::default()
-        .label(format!(" Avail: {}", ByteSize(avail)))
-        .ratio(avail_ratio.min(1.0))
-        .filled_style(Style::default().fg(Color::Rgb(80, 180, 140)))
-        .unfilled_style(Style::default().fg(theme::BG_BAR))
-        .line_set(symbols::line::THICK);
-    frame.render_widget(avail_gauge, rows[1]);
-
-    // Swap
     let swap_total = stats.swap_total();
     let swap_used = stats.swap_used();
-    let swap_ratio = if swap_total > 0 { swap_used as f64 / swap_total as f64 } else { 0.0 };
-
-    let swap_label = if swap_total > 0 {
-        format!(" Swap:  {} / {}", ByteSize(swap_used), ByteSize(swap_total))
+    let swap_pct = if swap_total > 0 { (swap_used as f64 / swap_total as f64) * 100.0 } else { 0.0 };
+    render_bar(frame, rows[4], "Swap", swap_pct, theme::WARN_YELLOW);
+    let swap_detail = if swap_total > 0 {
+        format!("        {} / {}", ByteSize(swap_used), ByteSize(swap_total))
     } else {
-        " Swap:  --".to_string()
+        "        --".to_string()
     };
+    frame.render_widget(Paragraph::new(swap_detail).style(Style::default().fg(theme::TEXT_SECONDARY)), rows[5]);
 
-    let swap_gauge = LineGauge::default()
-        .label(swap_label)
-        .ratio(swap_ratio.min(1.0))
-        .filled_style(Style::default().fg(theme::WARN_YELLOW))
-        .unfilled_style(Style::default().fg(theme::BG_BAR))
-        .line_set(symbols::line::THICK);
-    frame.render_widget(swap_gauge, rows[2]);
-
-    // Disk section
-    for (i, disk) in disks.iter().enumerate() {
-        let label_idx = 4 + i * 2;
-        let gauge_idx = 4 + i * 2 + 1;
-        if gauge_idx >= rows.len() {
-            break;
-        }
-
+    // Disk bar — show root disk
+    if let Some(disk) = root_disk {
         let pct = disk.percent();
-        let bar_color = if pct > 90.0 {
-            theme::CRIT_RED
-        } else if pct > 70.0 {
-            theme::WARN_YELLOW
-        } else {
-            theme::DISK_MAGENTA
-        };
+        let color = if pct > 90.0 { theme::CRIT_RED } else if pct > 70.0 { theme::WARN_YELLOW } else { theme::DISK_MAGENTA };
 
-        let label = Paragraph::new(format!(
-            " {}  {} free",
-            disk.mount_point,
+        render_bar(frame, rows[7], "Disk", pct as f64, color);
+        let detail = Paragraph::new(format!(
+            "        {} / {} ({} free)",
+            ByteSize(disk.used()),
+            ByteSize(disk.total),
             ByteSize(disk.available)
         ))
         .style(Style::default().fg(theme::TEXT_SECONDARY));
-        frame.render_widget(label, rows[label_idx]);
-
-        let gauge = LineGauge::default()
-            .label(format!(" {:.0}%", pct))
-            .ratio((pct as f64 / 100.0).min(1.0))
-            .filled_style(Style::default().fg(bar_color))
-            .unfilled_style(Style::default().fg(theme::BG_BAR))
-            .line_set(symbols::line::THICK);
-        frame.render_widget(gauge, rows[gauge_idx]);
+        frame.render_widget(detail, rows[8]);
     }
+}
+
+fn draw_network(frame: &mut Frame, area: Rect, stats: &SystemStats) {
+    let block = Block::default()
+        .title(" 󰛳 Network ")
+        .title_style(Style::default().fg(theme::CPU_GREEN).add_modifier(Modifier::BOLD))
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme::BORDER_NORMAL));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let net = &stats.network_stats;
+
+    let constraints = vec![
+        Constraint::Length(1), // Down speed
+        Constraint::Length(1), // Down top
+        Constraint::Length(1), // Down total
+        Constraint::Length(1), // Up speed
+        Constraint::Length(1), // Up top
+        Constraint::Length(1), // Up total
+        Constraint::Min(0),
+    ];
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
+        .split(inner);
+
+    let down_color = theme::CPU_GREEN;
+    let up_color = theme::CRIT_RED;
+
+    // Download
+    let down_speed = Paragraph::new(Line::from(vec![
+        Span::styled(" ▼ Down  ", Style::default().fg(down_color).add_modifier(Modifier::BOLD)),
+        Span::styled(format!("{}/s", ByteSize(net.download_speed)), Style::default().fg(theme::TEXT_PRIMARY)),
+    ]));
+    frame.render_widget(down_speed, rows[0]);
+
+    let down_top = Paragraph::new(format!("   Top:   {}/s", ByteSize(net.download_top)))
+        .style(Style::default().fg(theme::TEXT_SECONDARY));
+    frame.render_widget(down_top, rows[1]);
+
+    let down_total = Paragraph::new(format!("   Total: {}", ByteSize(net.download_total)))
+        .style(Style::default().fg(theme::TEXT_SECONDARY));
+    frame.render_widget(down_total, rows[2]);
+
+    // Upload
+    let up_speed = Paragraph::new(Line::from(vec![
+        Span::styled(" ▲ Up    ", Style::default().fg(up_color).add_modifier(Modifier::BOLD)),
+        Span::styled(format!("{}/s", ByteSize(net.upload_speed)), Style::default().fg(theme::TEXT_PRIMARY)),
+    ]));
+    frame.render_widget(up_speed, rows[3]);
+
+    let up_top = Paragraph::new(format!("   Top:   {}/s", ByteSize(net.upload_top)))
+        .style(Style::default().fg(theme::TEXT_SECONDARY));
+    frame.render_widget(up_top, rows[4]);
+
+    let up_total = Paragraph::new(format!("   Total: {}", ByteSize(net.upload_total)))
+        .style(Style::default().fg(theme::TEXT_SECONDARY));
+    frame.render_widget(up_total, rows[5]);
 }
 
 fn draw_ports(frame: &mut Frame, area: Rect, app: &mut App, stats: &SystemStats) {
@@ -247,6 +292,25 @@ fn draw_ports(frame: &mut Frame, area: Rect, app: &mut App, stats: &SystemStats)
         return;
     }
 
+    // Split: header row + list
+    let inner_block = block.inner(area);
+    frame.render_widget(block, area);
+
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(inner_block);
+
+    // Header row
+    let header = Paragraph::new(Line::from(vec![
+        Span::styled(format!(" {:<7}", "Port"), Style::default().fg(theme::TEXT_SECONDARY).add_modifier(Modifier::BOLD)),
+        Span::styled(format!("{:<14}", "Process"), Style::default().fg(theme::TEXT_SECONDARY).add_modifier(Modifier::BOLD)),
+        Span::styled(format!("{:>8}", "Mem"), Style::default().fg(theme::TEXT_SECONDARY).add_modifier(Modifier::BOLD)),
+        Span::styled(format!("{:>7}", "CPU%"), Style::default().fg(theme::TEXT_SECONDARY).add_modifier(Modifier::BOLD)),
+    ]));
+    frame.render_widget(header, sections[0]);
+
+    // Port list items
     let items: Vec<ListItem> = ports
         .iter()
         .map(|p| {
@@ -255,17 +319,18 @@ fn draw_ports(frame: &mut Frame, area: Rect, app: &mut App, stats: &SystemStats)
             } else {
                 "     --".to_string()
             };
+            let cpu_str = format!("{:>6.1}", p.cpu_usage);
             let line = Line::from(vec![
-                Span::styled(format!(" :{:<6}", p.port), Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled(format!(" :{:<6}", p.port), Style::default().fg(theme::ACCENT)),
                 Span::styled(format!("{:<14}", p.process_name), Style::default().fg(theme::TEXT_PRIMARY)),
                 Span::styled(mem_str, Style::default().fg(theme::WARN_YELLOW)),
+                Span::styled(cpu_str, Style::default().fg(theme::CPU_GREEN)),
             ]);
             ListItem::new(line)
         })
         .collect();
 
     let list = List::new(items)
-        .block(block)
         .highlight_style(
             Style::default()
                 .fg(theme::TEXT_PRIMARY)
@@ -273,5 +338,5 @@ fn draw_ports(frame: &mut Frame, area: Rect, app: &mut App, stats: &SystemStats)
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("▸");
-    frame.render_stateful_widget(list, area, &mut app.port_list_state);
+    frame.render_stateful_widget(list, sections[1], &mut app.port_list_state);
 }

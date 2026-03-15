@@ -1,19 +1,33 @@
-use sysinfo::{Disks, Pid, ProcessesToUpdate, System};
+use sysinfo::{Disks, Networks, Pid, ProcessesToUpdate, System};
 
 #[derive(Debug, Clone)]
 pub struct PortInfo {
     pub port: u16,
     pub pid: u32,
     pub process_name: String,
-    pub memory: u64, // RSS in bytes
+    pub memory: u64,
+    pub cpu_usage: f32,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct NetworkStats {
+    pub download_speed: u64,
+    pub upload_speed: u64,
+    pub download_top: u64,
+    pub upload_top: u64,
+    pub download_total: u64,
+    pub upload_total: u64,
 }
 
 pub struct SystemStats {
     sys: System,
     disks: Disks,
+    networks: Networks,
     pub cpu_history: Vec<f32>,
     pub per_core_usage: Vec<f32>,
     pub listening_ports: Vec<PortInfo>,
+    pub network_stats: NetworkStats,
+    slow_tick: u32, // counter to throttle expensive ops
 }
 
 impl SystemStats {
@@ -21,14 +35,19 @@ impl SystemStats {
         let mut sys = System::new_all();
         sys.refresh_all();
         let disks = Disks::new_with_refreshed_list();
+        let networks = Networks::new_with_refreshed_list();
         let per_core = sys.cpus().iter().map(|c| c.cpu_usage()).collect();
         let mut stats = Self {
             sys,
             disks,
+            networks,
             cpu_history: Vec::with_capacity(120),
             per_core_usage: per_core,
             listening_ports: Vec::new(),
+            network_stats: NetworkStats::default(),
+            slow_tick: 0,
         };
+        stats.sys.refresh_processes(ProcessesToUpdate::All, false);
         stats.refresh_ports();
         stats
     }
@@ -45,8 +64,40 @@ impl SystemStats {
         }
 
         self.per_core_usage = self.sys.cpus().iter().map(|c| c.cpu_usage()).collect();
-        self.sys.refresh_processes(ProcessesToUpdate::All, false);
-        self.refresh_ports();
+        self.networks.refresh(true);
+        self.refresh_network();
+
+        // Expensive ops (lsof + process refresh) every 5 ticks instead of every tick
+        self.slow_tick += 1;
+        if self.slow_tick >= 5 {
+            self.slow_tick = 0;
+            self.sys.refresh_processes(ProcessesToUpdate::All, false);
+            self.refresh_ports();
+        }
+    }
+
+    fn refresh_network(&mut self) {
+        let mut down: u64 = 0;
+        let mut up: u64 = 0;
+
+        for (_name, data) in self.networks.list() {
+            down += data.received();
+            up += data.transmitted();
+        }
+
+        // sysinfo's received()/transmitted() return bytes since last refresh
+        self.network_stats.download_speed = down;
+        self.network_stats.upload_speed = up;
+
+        self.network_stats.download_total += down;
+        self.network_stats.upload_total += up;
+
+        if down > self.network_stats.download_top {
+            self.network_stats.download_top = down;
+        }
+        if up > self.network_stats.upload_top {
+            self.network_stats.upload_top = up;
+        }
     }
 
     fn refresh_ports(&mut self) {
@@ -75,25 +126,23 @@ impl SystemStats {
                 Err(_) => continue,
             };
 
-            // NAME field is last, like "*:3000" or "127.0.0.1:8080"
-            let name_field = fields[fields.len() - 2]; // second to last (last is "(LISTEN)")
+            let name_field = fields[fields.len() - 2];
             let port: u16 = match name_field.rsplit(':').next().and_then(|p| p.parse().ok()) {
                 Some(p) => p,
                 None => continue,
             };
 
-            // Deduplicate (IPv4 + IPv6 show same port twice)
             if seen_ports.insert(port) {
-                let memory = self.sys
-                    .process(Pid::from(pid as usize))
-                    .map(|p| p.memory())
-                    .unwrap_or(0);
+                let proc = self.sys.process(Pid::from(pid as usize));
+                let memory = proc.map(|p| p.memory()).unwrap_or(0);
+                let cpu_usage = proc.map(|p| p.cpu_usage()).unwrap_or(0.0);
 
                 self.listening_ports.push(PortInfo {
                     port,
                     pid,
                     process_name,
                     memory,
+                    cpu_usage,
                 });
             }
         }
@@ -161,7 +210,6 @@ impl SystemStats {
             .collect()
     }
 
-    /// Returns sparkline characters for CPU history
     pub fn cpu_sparkline(&self) -> String {
         let bars = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
         self.cpu_history
@@ -173,7 +221,6 @@ impl SystemStats {
             .collect()
     }
 
-    /// Returns CPU history as u64 values (0-10000) for Sparkline widget
     pub fn cpu_history_u64(&self) -> Vec<u64> {
         self.cpu_history
             .iter()
