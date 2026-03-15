@@ -101,6 +101,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
                     if !app.app_list.is_empty() {
                         app.app_list_state.select(Some(0));
                     }
+                    app.filter_unused_apps();
                 }
                 ScanMessage::OrphanResults(orphans) => {
                     app.orphan_results = orphans;

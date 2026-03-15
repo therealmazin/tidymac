@@ -9,6 +9,7 @@ pub struct AppInfo {
     pub size: u64,
     pub bundle_id: Option<String>,
     pub related_files: Vec<ScanEntry>,
+    pub last_used: Option<String>, // "2026-03-14 21:54:22 +0000" or None
 }
 
 pub fn scan_installed() -> Vec<AppInfo> {
@@ -26,6 +27,7 @@ pub fn scan_installed() -> Vec<AppInfo> {
 
                 let size = dir_size(&path);
                 let bundle_id = read_bundle_id(&path);
+                let last_used = read_last_used(&path);
                 let related = find_related_files(&name, bundle_id.as_deref());
 
                 apps.push(AppInfo {
@@ -34,6 +36,7 @@ pub fn scan_installed() -> Vec<AppInfo> {
                     size,
                     bundle_id,
                     related_files: related,
+                    last_used,
                 });
             }
         }
@@ -75,6 +78,16 @@ pub fn scan_orphans() -> Vec<ScanEntry> {
 
     orphans.sort_by(|a, b| b.size.cmp(&a.size));
     orphans
+}
+
+fn read_last_used(app_path: &std::path::Path) -> Option<String> {
+    let output = std::process::Command::new("mdls")
+        .args(["-name", "kMDItemLastUsedDate", &app_path.to_string_lossy()])
+        .output()
+        .ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let value = stdout.split(" = ").nth(1)?.trim().to_string();
+    if value == "(null)" { None } else { Some(value) }
 }
 
 fn read_bundle_id(app_path: &std::path::Path) -> Option<String> {

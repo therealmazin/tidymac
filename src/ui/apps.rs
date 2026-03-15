@@ -160,11 +160,38 @@ fn draw_unused(frame: &mut Frame, area: Rect, app: &mut App) {
         return;
     }
 
-    // TODO: Filter by last used date via mdls — for now show placeholder
-    let empty = Paragraph::new("  Unused app detection coming soon.\n  Apps not opened in 6+ months will appear here.")
-        .style(Style::default().fg(theme::TEXT_SECONDARY))
-        .block(block.title(" Unused Apps "));
-    frame.render_widget(empty, area);
+    if app.unused_apps.is_empty() {
+        let empty = Paragraph::new("  No unused apps found. All apps were opened in the last 6 months.")
+            .style(Style::default().fg(theme::CPU_GREEN))
+            .block(block.title(" Unused Apps "));
+        frame.render_widget(empty, area);
+        return;
+    }
+
+    let items: Vec<ListItem> = app
+        .unused_apps
+        .iter()
+        .map(|app_info| {
+            let size_str = ByteSize(app_info.size).to_string();
+            let last_used_str = crate::app::format_last_used(&app_info.last_used);
+            let text = format!(
+                " \u{f0032} {} {:>10}  {}",
+                app_info.name, size_str, last_used_str
+            );
+            ListItem::new(text).style(Style::default().fg(theme::TEXT_PRIMARY))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(block.title(format!(" Unused Apps ({}) ", app.unused_apps.len())))
+        .highlight_style(
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .bg(theme::SELECTED_BG)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▸");
+    frame.render_stateful_widget(list, area, &mut app.unused_list_state);
 }
 
 fn draw_orphans(frame: &mut Frame, area: Rect, app: &mut App) {

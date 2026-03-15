@@ -25,7 +25,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
-            "  Files over 50 MB not modified in 3+ months.",
+            "  Files over 400 MB not modified in 3+ months.",
             Style::default().fg(theme::TEXT_SECONDARY),
         )),
     ]);

@@ -11,6 +11,60 @@ use std::path::PathBuf;
 
 const SPINNER_CHARS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
+/// Parse mdls date format "2025-09-16 00:52:11 +0000" into SystemTime
+fn parse_mdls_date(s: &str) -> Option<std::time::SystemTime> {
+    // Format: "YYYY-MM-DD HH:MM:SS +0000"
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    if parts.len() < 2 { return None; }
+
+    let date_parts: Vec<u64> = parts[0].split('-').filter_map(|p| p.parse().ok()).collect();
+    let time_parts: Vec<u64> = parts[1].split(':').filter_map(|p| p.parse().ok()).collect();
+
+    if date_parts.len() != 3 || time_parts.len() != 3 { return None; }
+
+    let (year, month, day) = (date_parts[0], date_parts[1], date_parts[2]);
+    let (hour, min, sec) = (time_parts[0], time_parts[1], time_parts[2]);
+
+    // Approximate: convert to seconds since Unix epoch
+    // Not perfectly accurate but good enough for "months ago" comparison
+    let days_since_epoch = (year - 1970) * 365 + (year - 1969) / 4
+        + match month {
+            1 => 0, 2 => 31, 3 => 59, 4 => 90, 5 => 120, 6 => 151,
+            7 => 181, 8 => 212, 9 => 243, 10 => 273, 11 => 304, 12 => 334,
+            _ => 0,
+        } + day - 1;
+
+    let secs = days_since_epoch * 86400 + hour * 3600 + min * 60 + sec;
+    Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs))
+}
+
+/// Format last_used as human-readable "X months ago" or "Never opened"
+pub fn format_last_used(last_used: &Option<String>) -> String {
+    match last_used {
+        None => "Never opened".to_string(),
+        Some(date_str) => {
+            match parse_mdls_date(date_str) {
+                Some(last) => {
+                    let age = std::time::SystemTime::now()
+                        .duration_since(last)
+                        .unwrap_or_default();
+                    let days = age.as_secs() / 86400;
+                    if days > 365 {
+                        format!("{} year{} ago", days / 365, if days / 365 > 1 { "s" } else { "" })
+                    } else if days > 30 {
+                        format!("{} month{} ago", days / 30, if days / 30 > 1 { "s" } else { "" })
+                    } else if days > 0 {
+                        format!("{} day{} ago", days, if days > 1 { "s" } else { "" })
+                    } else {
+                        "Today".to_string()
+                    }
+                }
+                None => "Unknown".to_string(),
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
     Home,
@@ -590,6 +644,31 @@ impl App {
             let _ = tx.send(ScanMessage::SmartScanProgress("Matching orphaned files...".to_string()));
             let _ = tx.send(ScanMessage::OrphanResults(orphans));
         });
+    }
+
+    pub fn filter_unused_apps(&mut self) {
+        use std::time::{SystemTime, Duration};
+
+        let six_months = Duration::from_secs(180 * 24 * 60 * 60);
+        let now = SystemTime::now();
+
+        self.unused_apps = self.app_list.iter().filter(|app| {
+            match &app.last_used {
+                None => true, // Never opened
+                Some(date_str) => {
+                    // Parse "2025-09-16 00:52:11 +0000"
+                    parse_mdls_date(date_str)
+                        .map(|last| {
+                            now.duration_since(last)
+                                .map(|age| age > six_months)
+                                .unwrap_or(false)
+                        })
+                        .unwrap_or(true) // If can't parse, consider unused
+                }
+            }
+        }).cloned().collect();
+
+        self.unused_apps.sort_by(|a, b| b.size.cmp(&a.size));
     }
 
     pub fn cycle_app_view(&mut self) {
