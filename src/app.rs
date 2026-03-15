@@ -72,7 +72,7 @@ pub enum Screen {
     Apps,
     SpaceLens,
     LargeOld,
-    Config,
+    Settings,
 }
 
 impl Screen {
@@ -83,7 +83,7 @@ impl Screen {
             Screen::Apps,
             Screen::SpaceLens,
             Screen::LargeOld,
-            Screen::Config,
+            Screen::Settings,
         ]
     }
 
@@ -94,7 +94,7 @@ impl Screen {
             Screen::Apps => "󰀲 Apps",
             Screen::SpaceLens => "󰋊 Space Lens",
             Screen::LargeOld => "󰱼 Large & Old",
-            Screen::Config => " Cfg",
+            Screen::Settings => " Settings",
         }
     }
 }

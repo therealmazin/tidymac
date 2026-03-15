@@ -106,7 +106,7 @@ fn draw_main(frame: &mut Frame, area: Rect, app: &mut App, stats: &SystemStats) 
         Screen::Apps => super::apps::draw(frame, area, app),
         Screen::SpaceLens => super::space_lens::draw(frame, area, app),
         Screen::LargeOld => super::large_old::draw(frame, area, app),
-        Screen::Config => super::config::draw(frame, area, app),
+        Screen::Settings => super::config::draw(frame, area, app),
     }
 }
 
@@ -158,7 +158,7 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
                 ]
             }
         }
-        Screen::Config => vec![
+        Screen::Settings => vec![
             ("q", "Quit"), ("Tab", "Focus"), ("Space", "Toggle"),
         ],
     };

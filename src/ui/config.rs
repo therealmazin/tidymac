@@ -6,6 +6,8 @@ use ratatui::{
 use crate::app::App;
 use super::theme;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -14,7 +16,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
             Constraint::Length(2), // Title
             Constraint::Length(5), // Safe Mode box
             Constraint::Length(1), // spacer
-            Constraint::Length(5), // About box
+            Constraint::Length(7), // About + Version + Update box
             Constraint::Min(0),   // remainder
         ])
         .split(area);
@@ -67,7 +69,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
     .block(safe_block);
     frame.render_widget(safe_text, chunks[1]);
 
-    // About section
+    // About + Version + Update
     let about_border = if app.config_index == 1 {
         theme::BORDER_FOCUSED
     } else {
@@ -82,12 +84,17 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let about_text = Paragraph::new(vec![
         Line::from(""),
+        Line::from(vec![
+            Span::styled("  tidymac ", Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("v{}", VERSION), Style::default().fg(theme::ACCENT)),
+        ]),
         Line::from(Span::styled(
-            "  tidymac v0.1.0",
-            Style::default().fg(theme::TEXT_PRIMARY),
+            "  A lightweight TUI system cleaner for macOS",
+            Style::default().fg(theme::TEXT_SECONDARY),
         )),
+        Line::from(""),
         Line::from(Span::styled(
-            "  A system cleaner for macOS",
+            "  Update: brew upgrade therealmazin/tidymac/tidymac",
             Style::default().fg(theme::TEXT_SECONDARY),
         )),
     ])

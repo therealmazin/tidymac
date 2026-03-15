@@ -209,7 +209,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
                                 KeyCode::Char(' ') => {
                                     if app.focus == Focus::Main {
                                         match app.screen {
-                                            app::Screen::Config => {
+                                            app::Screen::Settings => {
                                                 if app.config_index == 0 {
                                                     app.safe_mode = !app.safe_mode;
                                                 }
@@ -237,7 +237,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
                                             app::Screen::SmartScan => app.prev_smart_scan_item(),
                                             app::Screen::Apps => app.prev_app(),
                                             app::Screen::SpaceLens => app.prev_space_item(),
-                                            app::Screen::Config => {
+                                            app::Screen::Settings => {
                                                 if app.config_index > 0 { app.config_index -= 1; }
                                             }
                                             _ => app.prev_list_item(),
@@ -253,7 +253,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> 
                                             app::Screen::SmartScan => app.next_smart_scan_item(),
                                             app::Screen::Apps => app.next_app(),
                                             app::Screen::SpaceLens => app.next_space_item(),
-                                            app::Screen::Config => {
+                                            app::Screen::Settings => {
                                                 if app.config_index < 1 { app.config_index += 1; }
                                             }
                                             _ => app.next_list_item(),
