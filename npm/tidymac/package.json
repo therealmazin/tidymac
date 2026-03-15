@@ -1,13 +1,13 @@
 {
   "name": "tidymac",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A lightweight TUI system cleaner for macOS, written in Rust",
   "bin": {
     "tidymac": "bin/index.js"
   },
   "optionalDependencies": {
-    "@tidymac/darwin-arm64": "0.1.0",
-    "@tidymac/darwin-x64": "0.1.0"
+    "@tidymac/darwin-arm64": "0.2.0",
+    "@tidymac/darwin-x64": "0.2.0"
   },
   "keywords": [
     "macos",

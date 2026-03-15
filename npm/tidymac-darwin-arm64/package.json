@@ -1,6 +1,6 @@
 {
   "name": "@tidymac/darwin-arm64",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "tidymac macOS ARM64 (Apple Silicon) binary",
   "os": ["darwin"],
   "cpu": ["arm64"],
