@@ -1,17 +1,18 @@
 use std::path::{Path, PathBuf};
 
-/// Fast directory size using `du -sk` (much faster than walkdir)
-pub fn fast_dir_size(path: &Path) -> u64 {
+/// Fast directory size using `du -s -k` (much faster than walkdir)
+fn fast_dir_size(path: &Path) -> u64 {
     let output = std::process::Command::new("du")
-        .args(["-sk", &path.to_string_lossy()])
+        .args(["-s", "-k", &path.to_string_lossy()])
         .stderr(std::process::Stdio::null())
         .output();
     match output {
         Ok(o) if o.status.success() => {
             let s = String::from_utf8_lossy(&o.stdout);
-            s.split_whitespace()
+            // du output: "12345\t/path/to/dir"
+            s.split('\t')
                 .next()
-                .and_then(|n| n.parse::<u64>().ok())
+                .and_then(|n| n.trim().parse::<u64>().ok())
                 .map(|kb| kb * 1024)
                 .unwrap_or(0)
         }
@@ -19,58 +20,36 @@ pub fn fast_dir_size(path: &Path) -> u64 {
     }
 }
 
-/// Fast scan of immediate children using `du -sk *` in one call
+/// Scan children by listing dir entries then getting size of each with `du -sk`
 fn fast_children_sizes(path: &Path) -> Vec<(String, PathBuf, u64, bool)> {
-    // Use du -sk with max-depth=1 to get all children in one call
-    let output = std::process::Command::new("du")
-        .args(["-sk", "-d1", &path.to_string_lossy()])
-        .stderr(std::process::Stdio::null())
-        .output();
-
-    let mut results = Vec::new();
-
-    let output = match output {
-        Ok(o) if o.status.success() => o,
-        _ => return results,
+    let read_dir = match std::fs::read_dir(path) {
+        Ok(rd) => rd,
+        Err(_) => return Vec::new(),
     };
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let parent_str = path.to_string_lossy();
-
-    for line in stdout.lines() {
-        let mut parts = line.splitn(2, '\t');
-        let size_kb: u64 = match parts.next().and_then(|s| s.trim().parse().ok()) {
-            Some(s) => s,
-            None => continue,
-        };
-        let entry_path_str = match parts.next() {
-            Some(p) => p.trim(),
-            None => continue,
-        };
-
-        // Skip the parent directory itself (last line in du output)
-        if entry_path_str == parent_str {
-            continue;
-        }
-
-        let entry_path = PathBuf::from(entry_path_str);
-        let name = entry_path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
-
-        // Skip hidden dirs
+    let mut entries: Vec<(String, PathBuf, bool)> = Vec::new();
+    for entry in read_dir.filter_map(|e| e.ok()) {
+        let name = entry.file_name().to_string_lossy().to_string();
         if name.starts_with('.') && name != ".Trash" {
             continue;
         }
-
-        let size = size_kb * 1024;
-        if size < 1_000_000 {
-            continue; // Skip < 1MB
-        }
-
+        let entry_path = entry.path();
         let is_dir = entry_path.is_dir();
-        results.push((name, entry_path, size, is_dir));
+        entries.push((name, entry_path, is_dir));
+    }
+
+    let mut results: Vec<(String, PathBuf, u64, bool)> = Vec::new();
+
+    for (name, entry_path, is_dir) in entries {
+        let size = if is_dir {
+            fast_dir_size(&entry_path)
+        } else {
+            std::fs::metadata(&entry_path).map(|m| m.len()).unwrap_or(0)
+        };
+
+        if size >= 1_000_000 {
+            results.push((name, entry_path, size, is_dir));
+        }
     }
 
     results.sort_by(|a, b| b.2.cmp(&a.2));
