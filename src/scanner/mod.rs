@@ -33,14 +33,14 @@ impl ScanEntry {
     }
 }
 
-/// Compute total size of a directory recursively
+/// Compute total size of a directory recursively (parallel via jwalk)
 pub fn dir_size(path: &std::path::Path) -> u64 {
-    walkdir::WalkDir::new(path)
+    jwalk::WalkDir::new(path)
+        .skip_hidden(false)
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
-        .filter_map(|e| e.metadata().ok())
-        .map(|m| m.len())
+        .map(|e| e.metadata().map(|m| m.len()).unwrap_or(0))
         .sum()
 }
 

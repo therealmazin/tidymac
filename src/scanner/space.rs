@@ -1,56 +1,47 @@
 use std::path::{Path, PathBuf};
 
-/// Fast directory size using `du -s -k` (much faster than walkdir)
-fn fast_dir_size(path: &Path) -> u64 {
-    let output = std::process::Command::new("du")
-        .args(["-s", "-k", &path.to_string_lossy()])
-        .stderr(std::process::Stdio::null())
-        .output();
-    match output {
-        Ok(o) if o.status.success() => {
-            let s = String::from_utf8_lossy(&o.stdout);
-            // du output: "12345\t/path/to/dir"
-            s.split('\t')
-                .next()
-                .and_then(|n| n.trim().parse::<u64>().ok())
-                .map(|kb| kb * 1024)
-                .unwrap_or(0)
-        }
-        _ => 0,
-    }
+/// Fast parallel directory size using jwalk (rayon-backed)
+fn parallel_dir_size(path: &Path) -> u64 {
+    jwalk::WalkDir::new(path)
+        .skip_hidden(false)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.metadata().map(|m| m.len()).unwrap_or(0))
+        .sum()
 }
 
-/// Scan children by listing dir entries then getting size of each with `du -sk`
+/// Scan children: list entries with readdir, then size each with jwalk
 fn fast_children_sizes(path: &Path) -> Vec<(String, PathBuf, u64, bool)> {
-    let read_dir = match std::fs::read_dir(path) {
-        Ok(rd) => rd,
+    let entries: Vec<_> = match std::fs::read_dir(path) {
+        Ok(rd) => rd
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                !name.starts_with('.') || name == ".Trash"
+            })
+            .map(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                let path = e.path();
+                let is_dir = path.is_dir();
+                (name, path, is_dir)
+            })
+            .collect(),
         Err(_) => return Vec::new(),
     };
 
-    let mut entries: Vec<(String, PathBuf, bool)> = Vec::new();
-    for entry in read_dir.filter_map(|e| e.ok()) {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with('.') && name != ".Trash" {
-            continue;
-        }
-        let entry_path = entry.path();
-        let is_dir = entry_path.is_dir();
-        entries.push((name, entry_path, is_dir));
-    }
-
-    let mut results: Vec<(String, PathBuf, u64, bool)> = Vec::new();
-
-    for (name, entry_path, is_dir) in entries {
-        let size = if is_dir {
-            fast_dir_size(&entry_path)
-        } else {
-            std::fs::metadata(&entry_path).map(|m| m.len()).unwrap_or(0)
-        };
-
-        if size >= 1_000_000 {
-            results.push((name, entry_path, size, is_dir));
-        }
-    }
+    let mut results: Vec<(String, PathBuf, u64, bool)> = entries
+        .into_iter()
+        .map(|(name, path, is_dir)| {
+            let size = if is_dir {
+                parallel_dir_size(&path)
+            } else {
+                std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0)
+            };
+            (name, path, size, is_dir)
+        })
+        .filter(|(_, _, size, _)| *size >= 1_000_000)
+        .collect();
 
     results.sort_by(|a, b| b.2.cmp(&a.2));
     results
@@ -68,7 +59,7 @@ pub struct SpaceNode {
 }
 
 impl SpaceNode {
-    /// Load immediate children using fast du command
+    /// Load immediate children using parallel jwalk
     pub fn load_children(&mut self) {
         if self.children_loaded || !self.is_dir {
             return;
@@ -91,7 +82,7 @@ impl SpaceNode {
     }
 }
 
-/// Scan top-level home directories using fast du
+/// Scan top-level home directories
 pub fn scan_home_tree() -> Vec<SpaceNode> {
     let home = dirs::home_dir().unwrap_or_default();
     let children = fast_children_sizes(&home);

@@ -1,5 +1,5 @@
 use super::{dir_size, ScanEntry};
-use walkdir::WalkDir;
+use jwalk::WalkDir;
 
 pub fn scan() -> Vec<ScanEntry> {
     let mut entries = Vec::new();
@@ -39,11 +39,11 @@ pub fn scan() -> Vec<ScanEntry> {
             .filter_map(|e| e.ok())
         {
             if entry.file_name() == "target" && entry.file_type().is_dir() {
+                let entry_path = entry.path();
                 // Verify it's a Cargo target dir by checking for parent Cargo.toml
-                let parent = entry.path().parent();
-                if let Some(p) = parent {
+                if let Some(p) = entry_path.parent() {
                     if p.join("Cargo.toml").exists() {
-                        let size = dir_size(entry.path());
+                        let size = dir_size(&entry_path);
                         if size > 1_000_000 {
                             let project_name = p
                                 .file_name()
@@ -52,7 +52,7 @@ pub fn scan() -> Vec<ScanEntry> {
 
                             entries.push(ScanEntry::new(
                                 format!("target/ ({})", project_name),
-                                entry.path().to_path_buf(),
+                                entry_path,
                                 size,
                                 "",
                             ));

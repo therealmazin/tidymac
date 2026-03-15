@@ -24,8 +24,9 @@ pub fn scan() -> Vec<ScanEntry> {
             continue;
         }
 
-        let walker = walkdir::WalkDir::new(dir)
+        let walker = jwalk::WalkDir::new(dir)
             .max_depth(MAX_DEPTH)
+            .skip_hidden(false)
             .into_iter()
             .filter_map(|e| e.ok());
 

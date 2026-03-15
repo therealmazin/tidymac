@@ -1,5 +1,5 @@
 use super::{dir_size, ScanEntry};
-use walkdir::WalkDir;
+use jwalk::WalkDir;
 
 pub fn scan() -> Vec<ScanEntry> {
     let mut entries = Vec::new();
@@ -25,11 +25,10 @@ pub fn scan() -> Vec<ScanEntry> {
             .filter_map(|e| e.ok())
         {
             if entry.file_name() == "node_modules" && entry.file_type().is_dir() {
-                let size = dir_size(entry.path());
+                let entry_path = entry.path();
+                let size = dir_size(&entry_path);
                 if size > 1_000_000 {
-                    // Only show if > 1MB
-                    let parent_name = entry
-                        .path()
+                    let parent_name = entry_path
                         .parent()
                         .and_then(|p| p.file_name())
                         .map(|n| n.to_string_lossy().to_string())
@@ -37,7 +36,7 @@ pub fn scan() -> Vec<ScanEntry> {
 
                     entries.push(ScanEntry::new(
                         format!("node_modules ({})", parent_name),
-                        entry.path().to_path_buf(),
+                        entry_path,
                         size,
                         "󰌠",
                     ));
