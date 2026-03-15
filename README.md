@@ -30,8 +30,7 @@
 ### Homebrew (recommended)
 
 ```bash
-brew tap therealmazin/tidymac
-brew install tidymac
+brew install therealmazin/tidymac/tidymac
 ```
 
 ### npx (no install needed)
