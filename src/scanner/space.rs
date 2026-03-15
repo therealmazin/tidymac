@@ -197,7 +197,8 @@ fn build_children(path: &Path, dir_sizes: &HashMap<PathBuf, u64>) -> Vec<SpaceNo
         .filter_map(|e| e.ok())
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
-            if name.starts_with('.') && name != ".Trash" {
+            // Skip . and .. but show all other entries including hidden ones
+            if name == "." || name == ".." {
                 return None;
             }
 
